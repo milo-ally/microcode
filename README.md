@@ -1,6 +1,6 @@
 # Microcode
 
-AI-powered coding assistant for the terminal.
+AI-powered coding assistant with terminal (TUI) interface.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ bun install
 bun run build
 ```
 
-This compiles a standalone `microcode` executable (no runtime dependency) and installs it to:
+This compiles a standalone `microcode` executable (zero runtime dependencies) and installs it to:
 
 | Platform | Install path | Available immediately? |
 |---|---|---|
@@ -39,18 +39,24 @@ microcode --version
 microcode --help
 ```
 
+### Development
+
+```bash
+bun run dev        # Start in dev mode (bun source)
+```
+
 ## Configuration
 
 ### API Keys
 
 Set one or more protocol-specific keys. The model's protocol determines which key is used.
 
-| 协议                 | API Key            | Base URL           | Model           |
-|---------------------|--------------------|--------------------|-----------------|
-| openai-completions  | `OPENAI_API_KEY`   | `OPENAI_BASE_URL`  | `OPENAI_MODEL`  |
-| anthropic-messages  | `ANTHROPIC_API_KEY`| `ANTHROPIC_BASE_URL`| `ANTHROPIC_MODEL`|
-| google-generative-ai| `GEMINI_API_KEY`   | `GEMINI_BASE_URL`  | `GEMINI_MODEL`  |
-| 任意（兜底）         | `API_KEY`          | `BASE_URL`         | `MODEL`         |
+| Protocol             | API Key            | Base URL           | Model           |
+|----------------------|--------------------|--------------------|-----------------|
+| openai-completions   | `OPENAI_API_KEY`   | `OPENAI_BASE_URL`  | `OPENAI_MODEL`  |
+| anthropic-messages   | `ANTHROPIC_API_KEY`| `ANTHROPIC_BASE_URL`| `ANTHROPIC_MODEL`|
+| google-generative-ai | `GEMINI_API_KEY`   | `GEMINI_BASE_URL`  | `GEMINI_MODEL`  |
+| any (fallback)       | `API_KEY`          | `BASE_URL`         | `MODEL`         |
 
 DeepSeek and MiMo use the OpenAI protocol. Gemini models use the Gemini protocol.
 Multiple protocols can be configured simultaneously.
@@ -87,9 +93,17 @@ Place an `mcp.json` in `~/.microcode/` (user-level) or `.microcode/` (project-le
 
 ## Slash Commands
 
+- `/clear` — Clear conversation history
 - `/compact` — Compress conversation context
-- `/model` — Switch model
+- `/model` — Show or switch model
+- `/thinking` — Show or set thinking depth
+- `/permission` — Show or switch permission mode
+- `/skills` — List available skills
 - `/help` — Show available commands
+
+## Skills
+
+Skills are loaded from `SKILL.md` files in `~/.microcode/skills/` or `.microcode/skills/`. Invoke a skill with `/<skill-name>` to load its instructions into the system prompt.
 
 ## Sessions
 

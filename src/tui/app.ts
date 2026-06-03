@@ -37,7 +37,7 @@ import {
   IMAGE_EXTENSION_REGEX,
   type CachedImage,
 } from '../utils/imageUtils.ts'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import type { McpClientManager } from '../mcp/client.ts'
 import type { McpServerState, McpServerConfig } from '../mcp/types.ts'
 import { TOOL_NAME as BASH_TOOL_NAME } from '../tools/BashTool/BashTool.ts'
@@ -367,16 +367,30 @@ export class App {
         if (!textBeforeCursor.startsWith('/')) return null
 
         const query = textBeforeCursor.slice(1).toLowerCase()
-        const matches = BUILTIN_SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(query))
+        const builtinMatches = BUILTIN_SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(query))
 
-        if (matches.length === 0) return null
+        const skills = getSkills(this.agent)
+        const skillMatches = skills
+          .filter(s => !s.disableModelInvocation && s.name.startsWith(query))
+          .map(s => ({
+            value: `/${s.name}`,
+            label: `/${s.name}`,
+            description: s.description,
+          }))
 
-        return {
-          items: matches.map((cmd) => ({
+        const allMatches = [
+          ...builtinMatches.map(cmd => ({
             value: `/${cmd.name}`,
             label: `/${cmd.name}${cmd.argumentHint ? ` ${cmd.argumentHint}` : ''}`,
             description: cmd.description ?? '',
           })),
+          ...skillMatches,
+        ]
+
+        if (allMatches.length === 0) return null
+
+        return {
+          items: allMatches,
           prefix: textBeforeCursor,
         }
       },
@@ -487,9 +501,18 @@ export class App {
         this.showHelp()
         return true
 
-      default:
+      default: {
+        // Check if command matches a loaded skill
+        const skillName = command?.startsWith('/') ? command.slice(1) : ''
+        const skills = getSkills(this.agent)
+        const skill = skills.find(s => s.name === skillName && !s.disableModelInvocation)
+        if (skill) {
+          this.handleSkillSlashCommand(skill)
+          return true
+        }
         this.showError(`Unknown command: ${command}. Type /help for available commands.`)
         return true
+      }
     }
   }
 
@@ -1233,6 +1256,23 @@ export class App {
     this.ui.requestRender()
   }
 
+  private handleSkillSlashCommand(skill: { name: string; filePath: string; description: string }): void {
+    try {
+      const content = readFileSync(skill.filePath, 'utf-8')
+      this.agent.state.systemPrompt += `\n\n# Skill: ${skill.name}\n\n${content}`
+      this.chatContainer.addChild(
+        new Text(theme.fg('accent', `Loaded skill '${skill.name}' into system prompt.`), 1, 0),
+      )
+      this.chatContainer.addChild(
+        new Text(theme.dim(`  ${skill.description}`), 1, 0),
+      )
+      this.chatContainer.addChild(new Spacer(1))
+      this.ui.requestRender()
+    } catch (error) {
+      this.showError(`Failed to load skill '${skill.name}': ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
   /**
    * Interactively present questions from the ask_user_question tool and collect answers.
    * Each question is shown as a SelectList in the chat area.
@@ -1502,6 +1542,18 @@ export class App {
       `  BASE_URL              Fallback base URL`,
       `  MODEL                 Fallback model ID`,
     ]
+
+    // Add available skills
+    const skills = getSkills(this.agent)
+    if (skills.length > 0) {
+      helpText.push('')
+      helpText.push(`${theme.fg('accent', 'Available Skills:')}`)
+      helpText.push('')
+      for (const skill of skills) {
+        const disabled = skill.disableModelInvocation ? ' (disabled)' : ''
+        helpText.push(`  ${theme.bold(`/${skill.name}`)}${disabled}    ${skill.description}`)
+      }
+    }
 
     for (const line of helpText) {
       this.chatContainer.addChild(new Text(line, 1, 0))

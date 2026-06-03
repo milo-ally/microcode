@@ -1,11 +1,13 @@
+/**
+ * Entry point for microcode.
+ * Used both in dev mode (bun run ./src/entry.ts) and as the compiled binary
+ * (bun build ./src/entry.ts --compile).
+ */
 import { ensureBootstrapMacro } from './macro'
 
-// Set process title as early as possible
 try {
   process.title = 'microcode'
-} catch {
-  // process.title may not be supported on all platforms
-}
+} catch {}
 
 ensureBootstrapMacro()
 

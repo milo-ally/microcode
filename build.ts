@@ -9,7 +9,7 @@
  */
 import * as path from 'path'
 import * as os from 'os'
-import { existsSync, mkdirSync, copyFileSync, chmodSync, statSync } from 'fs'
+import { existsSync, mkdirSync, copyFileSync, chmodSync, statSync, unlinkSync } from 'fs'
 
 // ============================================================================
 // ANSI helpers
@@ -94,7 +94,6 @@ async function runBuild(): Promise<StepResult> {
   let spinnerIdx = 0
   let startTime = Date.now()
 
-  // Spawn bun build and capture stdout (where bun writes timing info)
   const proc = Bun.spawn({
     cmd: ['bun', 'build', './src/entry.ts', '--compile', '--outfile=' + COMPILED_BINARY],
     cwd: PROJECT_DIR,
@@ -102,7 +101,6 @@ async function runBuild(): Promise<StepResult> {
     stderr: 'pipe',
   })
 
-  // Read stdout in real time to parse bun's output
   const stdoutReader = proc.stdout.getReader()
   const decoder = new TextDecoder()
   let stdoutBuf = ''
@@ -113,7 +111,6 @@ async function runBuild(): Promise<StepResult> {
     write(`${CLEAR_LINE}  ${fg.cyan(frame)}  ${dim('compiling')} ${renderBar(Math.min(elapsed / 3000, 0.95))} ${dim(formatMs(elapsed))}`)
   }, 80)
 
-  // Consume stdout stream
   while (true) {
     const { done, value } = await stdoutReader.read()
     if (done) break
@@ -123,7 +120,6 @@ async function runBuild(): Promise<StepResult> {
   clearInterval(poll)
   await proc.exited
 
-  // Parse bun's output: "  [86ms]  bundle  2261 modules" and " [102ms] compile"
   const bundleMatch = stdoutBuf.match(/\[(\d+)ms\]\s+bundle\s+(\d+)\s+modules/)
   const compileMatch = stdoutBuf.match(/\[(\d+)ms\]\s+compile/)
 
@@ -183,7 +179,7 @@ async function main() {
     if (!existsSync(installDir)) {
       mkdirSync(installDir, { recursive: true })
     }
-
+    try { unlinkSync(installPath) } catch {}
     copyFileSync(COMPILED_BINARY, installPath)
     if (!IS_WINDOWS) {
       chmodSync(installPath, 0o755)
