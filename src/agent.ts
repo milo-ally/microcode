@@ -153,6 +153,13 @@ export function createMicrocodeAgent(options: CreateMicrocodeAgentOptions = {}) 
   ;(agent as any).__skills = skillsResult.skills
   ;(agent as any).__skillDiagnostics = skillsResult.diagnostics
 
+  // Save base system prompt (before any skill content is appended) so we can
+  // rebuild it when skills are loaded/unloaded.
+  ;(agent as any).__baseSystemPrompt = agent.state.systemPrompt
+
+  // Track which skills are currently loaded into the system prompt.
+  ;(agent as any).__loadedSkills = new Map<string, string>()
+
   // Wire up getTool resolver on PermissionManager so it can look up tools
   // by name (used by ask_user_question to store answers on the tool object)
   if (options.permissionManager) {
@@ -211,6 +218,41 @@ export function getSkills(agent: Agent): Skill[] {
  */
 export function getSkillDiagnostics(agent: Agent): string[] {
   return (agent as any).__skillDiagnostics ?? []
+}
+
+export function isSkillLoaded(agent: Agent, skillName: string): boolean {
+  return (agent as any).__loadedSkills?.has(skillName) ?? false
+}
+
+export function getLoadedSkillNames(agent: Agent): string[] {
+  return [...((agent as any).__loadedSkills?.keys() ?? [])]
+}
+
+export function loadSkillIntoPrompt(agent: Agent, skill: Skill, body: string): void {
+  const loadedSkills = (agent as any).__loadedSkills as Map<string, string>
+  if (!loadedSkills || loadedSkills.has(skill.name)) return
+
+  loadedSkills.set(skill.name, body)
+  rebuildSystemPrompt(agent)
+}
+
+export function unloadSkillFromPrompt(agent: Agent, skillName: string): void {
+  const loadedSkills = (agent as any).__loadedSkills as Map<string, string>
+  if (!loadedSkills || !loadedSkills.has(skillName)) return
+
+  loadedSkills.delete(skillName)
+  rebuildSystemPrompt(agent)
+}
+
+function rebuildSystemPrompt(agent: Agent): void {
+  const basePrompt = (agent as any).__baseSystemPrompt as string
+  const loadedSkills = (agent as any).__loadedSkills as Map<string, string>
+
+  let prompt = basePrompt
+  for (const [name, body] of loadedSkills) {
+    prompt += `\n\n# Skill: ${name}\n\n${body}`
+  }
+  agent.state.systemPrompt = prompt
 }
 
 /**

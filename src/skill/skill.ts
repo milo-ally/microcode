@@ -339,6 +339,12 @@ function loadSkillFromFile(
   }
 }
 
+export function readSkillBody(skill: Skill): string {
+  const rawContent = readFileSync(skill.filePath, 'utf-8')
+  const { content } = parseFrontmatter<SkillFrontmatter>(rawContent)
+  return content
+}
+
 export function formatSkillsForPrompt(skills: Skill[]): string {
   const visibleSkills = skills.filter((s) => !s.disableModelInvocation)
 

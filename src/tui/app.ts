@@ -37,7 +37,7 @@ import {
   IMAGE_EXTENSION_REGEX,
   type CachedImage,
 } from '../utils/imageUtils.ts'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync } from 'fs'
 import type { McpClientManager } from '../mcp/client.ts'
 import type { McpServerState, McpServerConfig } from '../mcp/types.ts'
 import { TOOL_NAME as BASH_TOOL_NAME } from '../tools/BashTool/BashTool.ts'
@@ -46,7 +46,8 @@ import { TOOL_NAME as WRITE_TOOL_NAME } from '../tools/FileWriteTool/FileWriteTo
 import { TOOL_NAME as EDIT_TOOL_NAME } from '../tools/FileEditTool/FileEditTool.ts'
 import { addMcpServer, removeMcpServer, type ConfigScope } from '../mcp/configWrite.ts'
 import { SessionManager } from '../session/SessionManager.ts'
-import { getCompactionManager, getSkills, getSkillDiagnostics, rebuildCoreTools } from '../agent.ts'
+import { getCompactionManager, getSkills, getSkillDiagnostics, rebuildCoreTools, isSkillLoaded, loadSkillIntoPrompt, unloadSkillFromPrompt } from '../agent.ts'
+import { readSkillBody, type Skill } from '../skill/skill.ts'
 import { createMcpTools, createListMcpResourcesTool, createReadMcpResourceTool, registerMcpToolsAsDeferred, getDeferredToolNames } from '../tools/index.ts'
 import { PermissionManager, type PermissionMode, PERMISSION_MODES } from '../permissions/index.ts'
 
@@ -1227,8 +1228,9 @@ export class App {
 
       for (const skill of skills) {
         const disabled = skill.disableModelInvocation ? theme.dim(' (disabled)') : ''
+        const loaded = isSkillLoaded(this.agent, skill.name) ? chalk.green(' (loaded)') : theme.dim(' (unloaded)')
         this.chatContainer.addChild(
-          new Text(`${theme.bold(skill.name)}${disabled}`, 1, 0),
+          new Text(`${theme.bold(skill.name)}${disabled}${loaded}`, 1, 0),
         )
         this.chatContainer.addChild(
           new Text(`  ${theme.dim(skill.description)}`, 1, 0),
@@ -1256,21 +1258,92 @@ export class App {
     this.ui.requestRender()
   }
 
-  private handleSkillSlashCommand(skill: { name: string; filePath: string; description: string }): void {
-    try {
-      const content = readFileSync(skill.filePath, 'utf-8')
-      this.agent.state.systemPrompt += `\n\n# Skill: ${skill.name}\n\n${content}`
-      this.chatContainer.addChild(
-        new Text(theme.fg('accent', `Loaded skill '${skill.name}' into system prompt.`), 1, 0),
-      )
-      this.chatContainer.addChild(
-        new Text(theme.dim(`  ${skill.description}`), 1, 0),
-      )
-      this.chatContainer.addChild(new Spacer(1))
-      this.ui.requestRender()
-    } catch (error) {
-      this.showError(`Failed to load skill '${skill.name}': ${error instanceof Error ? error.message : 'Unknown error'}`)
+  private handleSkillSlashCommand(skill: Skill): void {
+    const currentlyLoaded = isSkillLoaded(this.agent, skill.name)
+
+    const statusText = currentlyLoaded
+      ? chalk.green('loaded')
+      : theme.dim('unloaded')
+
+    const headerLabel = theme.fg('accent', `Skill '${skill.name}':`)
+    this.chatContainer.addChild(
+      new Text(`${headerLabel} ${statusText}`, 1, 0),
+    )
+    this.chatContainer.addChild(
+      new Text(theme.dim(`  ${skill.description}`), 1, 0),
+    )
+
+    const items: SelectItem[] = []
+    if (currentlyLoaded) {
+      items.push({ value: 'unload', label: 'Unload', description: 'Remove skill from system prompt' })
+    } else {
+      items.push({ value: 'load', label: 'Load', description: 'Add skill to system prompt' })
     }
+    items.push({ value: 'cancel', label: 'Cancel', description: 'Do nothing' })
+
+    const selectList = new SelectList(items, items.length, {
+      selectedPrefix: (text) => chalk.cyan(text),
+      selectedText: (text) => chalk.cyan(text),
+      description: (text) => theme.dim(text),
+      scrollInfo: (text) => theme.dim(text),
+      noMatch: (text) => theme.dim(text),
+    })
+
+    this.chatContainer.addChild(selectList)
+    this.ui.setFocus(selectList)
+    this.ui.requestRender()
+
+    let finished = false
+
+    const removeListener = this.ui.addInputListener((data) => {
+      if (data === '\x03') {
+        finished = true
+        removeListener()
+        this.chatContainer.removeChild(selectList)
+        this.chatContainer.addChild(new Spacer(1))
+        this.ui.setFocus(this.editor)
+        this.ui.requestRender()
+        return { consume: true }
+      }
+      return undefined
+    })
+
+    const finish = (value?: string) => {
+      if (finished) return
+      finished = true
+      removeListener()
+      this.chatContainer.removeChild(selectList)
+
+      if (value === 'load') {
+        try {
+          const body = readSkillBody(skill)
+          loadSkillIntoPrompt(this.agent, skill, body)
+          this.chatContainer.addChild(
+            new Text(theme.fg('accent', `Loaded skill '${skill.name}' into system prompt.`), 1, 0),
+          )
+        } catch (error) {
+          this.chatContainer.addChild(
+            new Text(theme.fg('red', `Failed to load skill '${skill.name}': ${error instanceof Error ? error.message : 'Unknown error'}`), 1, 0),
+          )
+        }
+      } else if (value === 'unload') {
+        unloadSkillFromPrompt(this.agent, skill.name)
+        this.chatContainer.addChild(
+          new Text(theme.fg('accent', `Unloaded skill '${skill.name}' from system prompt.`), 1, 0),
+        )
+      } else {
+        this.chatContainer.addChild(
+          new Text(theme.dim('Cancelled.'), 1, 0),
+        )
+      }
+
+      this.chatContainer.addChild(new Spacer(1))
+      this.ui.setFocus(this.editor)
+      this.ui.requestRender()
+    }
+
+    selectList.onSelect = (item) => finish(item.value)
+    selectList.onCancel = () => finish(undefined)
   }
 
   /**
