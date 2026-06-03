@@ -1,6 +1,7 @@
 import type { Agent, AgentEvent, AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core'
 import { generateSummary, DEFAULT_COMPACTION_SETTINGS } from '@earendil-works/pi-agent-core'
 import type { Api, AssistantMessage } from '@earendil-works/pi-ai'
+import { completeSimple } from '@earendil-works/pi-ai'
 import {
   TUI,
   ProcessTerminal,
@@ -16,7 +17,7 @@ import {
 } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { resolveConfig, createModelForId, type ResolvedConfig } from '../config.ts'
-import { getAllModels } from '../models/index.ts'
+import { getAllModels, resolveApiKey } from '../models/index.ts'
 import { getSystemPrompt } from '../constants/prompts.ts'
 import { theme, getEditorTheme, getMarkdownTheme, getBashModeBorderColor } from './theme.ts'
 import { MicrocodeEditor } from './components/microcodeEditor.ts'
@@ -63,7 +64,8 @@ const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   { name: 'model', description: 'Show or switch model (usage: /model [model-id])', argumentHint: '[model-id]' },
   { name: 'thinking', description: 'Show or set thinking depth (usage: /thinking [level])', argumentHint: '[off|minimal|low|medium|high|xhigh]' },
   { name: 'mcp', description: 'Manage MCP servers (usage: /mcp [add|remove|enable|disable|reconnect] [args...])', argumentHint: '[action] [args...]' },
-  { name: 'session', description: 'Show session info or list sessions', argumentHint: '[list]' },
+  { name: 'session', description: 'Browse and load saved sessions', argumentHint: '' },
+  { name: 'new', description: 'Start a new conversation session' },
   { name: 'permission', description: 'Show or switch permission mode (usage: /permission [mode])', argumentHint: '[mode]' },
   { name: 'skills', description: 'Show available skills' },
   { name: 'exit', description: 'Exit Microcode' },
@@ -98,6 +100,7 @@ export class App {
   private pendingImages: CachedImage[] = []
   private imagePathProcessing = false
   private suppressTrailingQuote = false
+  private titleGenerated = false
   onExit?: () => void | Promise<void>
 
   constructor(agent: Agent, mcpClient?: McpClientManager, sessionManager?: SessionManager, permissionManager?: PermissionManager, modelId?: string, thinkingLevel?: ThinkingLevel) {
@@ -138,6 +141,17 @@ export class App {
   async run(): Promise<void> {
     this.init()
     this.setupAgentSubscription()
+
+    // Show existing session title in footer (e.g., from --resume)
+    const currentId = this.sessionManager.getSessionId()
+    if (currentId) {
+      const existingTitle = this.sessionManager.getTitle(currentId)
+      if (existingTitle) {
+        this.footer.setSessionTitle(existingTitle)
+        this.footer.invalidate()
+        this.ui.requestRender()
+      }
+    }
 
     // Show any queued startup warnings
     for (const msg of this.startupWarnings) {
@@ -498,6 +512,10 @@ export class App {
         this.exit()
         return true
 
+      case '/new':
+        this.handleNewSession()
+        return true
+
       case '/help':
         this.showHelp()
         return true
@@ -635,37 +653,258 @@ export class App {
     }
   }
 
-  private async handleSessionCommand(args: string): Promise<void> {
-    const parts = args.trim().split(/\s+/)
-    const action = parts[0]?.toLowerCase()
+  private async handleSessionCommand(_args: string): Promise<void> {
+    const sessions = await this.sessionManager.listWithTitles()
+    const currentId = this.sessionManager.getSessionId()
 
-    if (action === 'list' || !action) {
-      const sessions = await this.sessionManager.list()
-      if (sessions.length === 0) {
-        this.chatContainer.addChild(
-          new Text(theme.dim('No saved sessions found.'), 1, 0),
-        )
-      } else {
-        this.chatContainer.addChild(
-          new Text(theme.fg('accent', 'Recent sessions:'), 1, 0),
-        )
-        this.chatContainer.addChild(new Spacer(1))
-        for (const session of sessions.slice(0, 10)) {
-          const date = new Date(session.createdAt).toLocaleString()
-          const cwd = session.cwd
-          const isCurrent = session.id === this.sessionManager.getSessionId()
-          const prefix = isCurrent ? theme.fg('accent', ' → ') : '   '
-          this.chatContainer.addChild(
-            new Text(`${prefix}${theme.bold(session.id.slice(0, 8))} ${theme.dim(date)} ${theme.dim(cwd)}`, 1, 0),
-          )
-        }
-      }
+    if (sessions.length === 0) {
+      this.chatContainer.addChild(
+        new Text(theme.dim('No saved sessions found.'), 1, 0),
+      )
       this.chatContainer.addChild(new Spacer(1))
       this.ui.requestRender()
       return
     }
 
-    this.showError('Usage: /session [list]')
+    const items: SelectItem[] = []
+    for (const s of sessions.slice(0, 20)) {
+      const isCurrent = s.id === currentId
+      const prefix = isCurrent ? '* ' : '  '
+      const date = new Date(s.createdAt).toLocaleString()
+      const title = s.title ?? theme.dim('(no title)')
+      const label = `${prefix}${title}`
+      const desc = `${s.id.slice(0, 8)}  ${date}  ${s.cwd}${isCurrent ? ' (current)' : ''}`
+      items.push({ value: s.id, label, description: desc })
+    }
+    items.push({ value: '__cancel__', label: 'Cancel', description: 'Return without loading' })
+
+    const selectList = new SelectList(items, Math.min(items.length, 10), {
+      selectedPrefix: (text) => chalk.cyan(text),
+      selectedText: (text) => chalk.cyan(text),
+      description: (text) => theme.dim(text),
+      scrollInfo: (text) => theme.dim(text),
+      noMatch: (text) => theme.dim(text),
+    })
+
+    this.chatContainer.addChild(
+      new Text(theme.fg('accent', 'Select a session to load:'), 1, 0),
+    )
+    this.chatContainer.addChild(selectList)
+    this.ui.setFocus(selectList)
+    this.ui.requestRender()
+
+    let finished = false
+
+    const removeListener = this.ui.addInputListener((data) => {
+      if (data === '\x03') {
+        finished = true
+        removeListener()
+        this.chatContainer.removeChild(selectList)
+        this.chatContainer.addChild(new Spacer(1))
+        this.ui.setFocus(this.editor)
+        this.ui.requestRender()
+        return { consume: true }
+      }
+      return undefined
+    })
+
+    const finish = async (value?: string) => {
+      if (finished) return
+      if (!value || value === '__cancel__') {
+        finished = true
+        removeListener()
+        this.chatContainer.removeChild(selectList)
+        this.chatContainer.addChild(new Text(theme.dim('Cancelled.'), 1, 0))
+        this.chatContainer.addChild(new Spacer(1))
+        this.ui.setFocus(this.editor)
+        this.ui.requestRender()
+        return
+      }
+
+      const selected = sessions.find((s) => s.id === value)
+      if (!selected) return
+
+      finished = true
+      removeListener()
+      this.chatContainer.removeChild(selectList)
+
+      if (selected.id === currentId) {
+        this.chatContainer.addChild(
+          new Text(theme.dim('Already in this session.'), 1, 0),
+        )
+        this.chatContainer.addChild(new Spacer(1))
+        this.ui.setFocus(this.editor)
+        this.ui.requestRender()
+        return
+      }
+
+      try {
+        // Save current session then load target
+        const messages = await this.sessionManager.switchToSession(
+          selected,
+          this.agent.state.messages as AgentMessage[],
+        )
+
+        // Replace messages on agent
+        this.agent.state.messages.length = 0
+        this.agent.state.messages.push(...messages)
+
+        // Rebuild system prompt preserving loaded skills
+        this.rebuildSystemPromptForResume()
+
+        // Clear and re-render chat
+        this.rerenderChat(messages)
+
+        this.chatContainer.addChild(
+          new Text(theme.fg('accent', `Loaded session: ${selected.title ?? selected.id.slice(0, 8)}`), 1, 0),
+        )
+        this.chatContainer.addChild(
+          new Text(theme.dim(`  ${selected.id}  ${new Date(selected.createdAt).toLocaleString()}`), 1, 0),
+        )
+        this.chatContainer.addChild(new Spacer(1))
+        this.updateContextUsage()
+        // Show session title in footer
+        this.footer.setSessionTitle(selected.title ?? null)
+        this.footer.invalidate()
+      } catch (error) {
+        this.chatContainer.addChild(
+          new Text(theme.fg('red', `Failed to load session: ${error instanceof Error ? error.message : 'Unknown error'}`), 1, 0),
+        )
+        this.chatContainer.addChild(new Spacer(1))
+      }
+
+      this.ui.setFocus(this.editor)
+      this.ui.requestRender()
+    }
+
+    selectList.onSelect = (item) => finish(item.value)
+    selectList.onCancel = () => finish(undefined)
+  }
+
+  private async handleNewSession(): Promise<void> {
+    // Save current session
+    await this.sessionManager.saveMessages(this.agent.state.messages as AgentMessage[])
+
+    // Create new session
+    const cwd = process.cwd()
+    await this.sessionManager.create(cwd)
+
+    // Reset state
+    this.agent.state.messages.length = 0
+    this.titleGenerated = false
+    this.footer.setSessionTitle(null)
+    this.footer.invalidate()
+
+    // Clear chat and show confirmation
+    this.chatContainer.clear()
+    const newId = this.sessionManager.getSessionId()
+    this.chatContainer.addChild(
+      new Text(theme.fg('accent', `New session created: ${newId?.slice(0, 8)}`), 1, 0),
+    )
+    this.chatContainer.addChild(new Spacer(1))
+    this.ui.requestRender()
+  }
+
+  private async generateSessionTitle(): Promise<void> {
+    const messages = this.agent.state.messages as AgentMessage[]
+    const firstUser = messages.find((m) => m.role === 'user')
+    if (!firstUser) return
+
+    let text = ''
+    if (typeof firstUser.content === 'string') {
+      text = firstUser.content
+    } else if (Array.isArray(firstUser.content)) {
+      text = firstUser.content
+        .filter((c: any) => c.type === 'text')
+        .map((c: any) => c.text)
+        .join(' ')
+    }
+
+    text = text.trim()
+    if (!text) return
+
+    const fallbackTitle = text.length > 60 ? text.slice(0, 57) + '...' : text
+
+    let title = fallbackTitle
+    try {
+      const model = this.agent.state.model
+      const apiKey = resolveApiKey(model)
+      const result = await completeSimple(model, {
+        systemPrompt: 'Generate a short, concise title (5 words max) for a conversation. Reply with ONLY the title, no quotes, no explanation.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: `Generate a title for a conversation that starts with: "${text.slice(0, 200)}"` }] }],
+      } as any, { apiKey, maxTokens: 30, temperature: 0.3 })
+
+      const titleContent = result.content.find((c: any) => c.type === 'text') as any
+      if (titleContent?.text) {
+        title = titleContent.text.trim().replace(/^["']|["']$/g, '')
+      }
+    } catch {
+      // Use fallback title
+    }
+
+    const sessionId = this.sessionManager.getSessionId()
+    if (sessionId) {
+      this.sessionManager.setTitle(sessionId, title)
+      this.footer.setSessionTitle(title)
+      this.footer.invalidate()
+      this.ui.requestRender()
+    }
+  }
+
+  /**
+   * Rebuild system prompt for a resumed session, preserving loaded skills.
+   */
+  private rebuildSystemPromptForResume(): void {
+    const basePrompt = (this.agent as any).__baseSystemPrompt as string
+    const loadedSkills = (this.agent as any).__loadedSkills as Map<string, string> | undefined
+
+    if (basePrompt) {
+      let prompt = basePrompt
+      if (loadedSkills && loadedSkills.size > 0) {
+        for (const [name, body] of loadedSkills) {
+          prompt += `\n\n# Skill: ${name}\n\n${body}`
+        }
+      }
+      this.agent.state.systemPrompt = prompt
+    }
+
+    // Update compaction manager with new system prompt
+    const compactionManager = getCompactionManager(this.agent)
+    if (compactionManager) {
+      compactionManager.setSystemPrompt(this.agent.state.systemPrompt)
+    }
+  }
+
+  /**
+   * Clear the chat container and re-render all messages from history.
+   */
+  private rerenderChat(messages: AgentMessage[]): void {
+    this.chatContainer.clear()
+
+    for (const msg of messages) {
+      if (msg.role === 'user') {
+        let text = ''
+        let images: ImageContent[] | undefined
+        if (typeof msg.content === 'string') {
+          text = msg.content
+        } else if (Array.isArray(msg.content)) {
+          const textParts = msg.content.filter((c: any) => c.type === 'text').map((c: any) => c.text)
+          text = textParts.join('\n')
+          const imageParts = msg.content.filter((c: any) => c.type === 'image') as ImageContent[]
+          if (imageParts.length > 0) images = imageParts
+        }
+        this.chatContainer.addChild(new UserMessage(text, images))
+        this.chatContainer.addChild(new Spacer(1))
+      } else if (msg.role === 'assistant') {
+        const component = new AssistantMessageComponent(getMarkdownTheme())
+        component.updateContent(msg as any)
+        this.chatContainer.addChild(component)
+        this.chatContainer.addChild(new Spacer(1))
+      } else if ((msg as any).role === 'toolResult') {
+        // Tool results are rendered as part of their parent assistant message
+        // Skip standalone rendering
+      }
+    }
   }
 
   private handleModelCommand(searchTerm?: string): void {
@@ -1588,7 +1827,8 @@ export class App {
       `  ${theme.bold('/model')} [model-id]   Show current model or switch to a different model`,
       `  ${theme.bold('/thinking')} [level]   Show or set thinking depth`,
       `  ${theme.bold('/mcp')}                Manage MCP servers (add/remove/enable/disable)`,
-      `  ${theme.bold('/session')} [list]     Show session info or list saved sessions`,
+      `  ${theme.bold('/session')}            Browse and load saved sessions`,
+      `  ${theme.bold('/new')}                Start a new conversation session`,
       `  ${theme.bold('/permission')} [mode]  Show or switch permission mode`,
       `  ${theme.bold('/exit')}               Exit Microcode`,
       `  ${theme.bold('/help')}               Show this help message`,
@@ -1791,6 +2031,11 @@ export class App {
             )
           }
           this.chatContainer.addChild(new Spacer(1))
+          // Generate session title from first user message
+          if (!this.titleGenerated) {
+            this.titleGenerated = true
+            void this.generateSessionTitle()
+          }
           // Save messages to session after each turn
           void this.sessionManager.saveMessages(this.agent.state.messages as AgentMessage[])
           this.updateContextUsage()

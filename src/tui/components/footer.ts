@@ -46,6 +46,7 @@ export class FooterComponent implements Component {
   private contextPercent: number | null = null
   private contextTokens: number | null = null
   private contextWindow: number | null = null
+  private sessionTitle: string | null = null
 
   constructor(agent: Agent, modelId: string, provider: string, cwd: string, thinkingLevel?: ThinkingLevel) {
     this.agent = agent
@@ -71,9 +72,21 @@ export class FooterComponent implements Component {
     this.contextWindow = contextWindow
   }
 
+  setSessionTitle(title: string | null): void {
+    this.sessionTitle = title
+  }
+
   invalidate(): void {}
 
   render(width: number): string[] {
+    const lines: string[] = []
+
+    // Title line (if set)
+    if (this.sessionTitle) {
+      const titleText = truncateToWidth(`Title: ${this.sessionTitle}`, width, '...')
+      lines.push(chalk.hex('#999999')(titleText))
+    }
+
     // Build left side: cwd (branch) + stats
     let pwd = this.cwd
     const home = process.env.HOME || process.env.USERPROFILE
@@ -121,6 +134,7 @@ export class FooterComponent implements Component {
       statsLine = truncateToWidth(statsLeft, width, '...')
     }
 
-    return [statsLine]
+    lines.push(statsLine)
+    return lines
   }
 }

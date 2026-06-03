@@ -1,5 +1,6 @@
 import * as path from 'path'
 import * as os from 'os'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import {
   JsonlSessionRepo,
   Session,
@@ -10,6 +11,11 @@ import { NodeFileSystem } from './NodeFileSystem.ts'
 import { replaceImageBlocksForPersistence } from './imageSerializer.ts'
 
 const SESSIONS_DIR = path.join(os.homedir(), '.microcode', 'sessions')
+const TITLES_FILE = path.join(SESSIONS_DIR, '.titles.json')
+
+export interface SessionListItem extends JsonlSessionMetadata {
+  title?: string
+}
 
 /**
  * Manages session lifecycle: create, persist, resume, list.
@@ -20,6 +26,7 @@ export class SessionManager {
   private session: Session | null = null
   private metadata: JsonlSessionMetadata | null = null
   private savedMessageCount = 0
+  private titleCache: Map<string, string> | null = null
 
   constructor() {
     const fs = new NodeFileSystem('/')
@@ -34,7 +41,7 @@ export class SessionManager {
    */
   async create(cwd: string): Promise<string> {
     this.session = await this.repo.create({ cwd })
-    this.metadata = await this.session.getMetadata()
+    this.metadata = await this.session.getMetadata() as JsonlSessionMetadata
     this.savedMessageCount = 0
     return this.metadata.id
   }
@@ -142,5 +149,84 @@ export class SessionManager {
    */
   setSavedMessageCount(count: number): void {
     this.savedMessageCount = count
+  }
+
+  /**
+   * Load the titles map from disk into cache.
+   */
+  private loadTitles(): void {
+    if (this.titleCache) return
+    try {
+      if (existsSync(TITLES_FILE)) {
+        const raw = readFileSync(TITLES_FILE, 'utf-8')
+        const data = JSON.parse(raw)
+        this.titleCache = new Map(Object.entries(data))
+      } else {
+        this.titleCache = new Map()
+      }
+    } catch {
+      this.titleCache = new Map()
+    }
+  }
+
+  /**
+   * Save the titles cache back to disk.
+   */
+  private saveTitles(): void {
+    try {
+      const dir = path.dirname(TITLES_FILE)
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true })
+      }
+      const data = Object.fromEntries(this.titleCache ?? new Map())
+      writeFileSync(TITLES_FILE, JSON.stringify(data, null, 2))
+    } catch {}
+  }
+
+  /**
+   * Set the title for a session.
+   */
+  setTitle(sessionId: string, title: string): void {
+    this.loadTitles()
+    this.titleCache!.set(sessionId, title)
+    this.saveTitles()
+  }
+
+  /**
+   * Get the title for a session.
+   */
+  getTitle(sessionId: string): string | undefined {
+    this.loadTitles()
+    return this.titleCache?.get(sessionId)
+  }
+
+  /**
+   * List sessions enriched with titles.
+   */
+  async listWithTitles(cwd?: string): Promise<SessionListItem[]> {
+    const sessions = await this.repo.list({ cwd })
+    this.loadTitles()
+    return sessions.map((s) => ({
+      ...s,
+      title: this.titleCache?.get(s.id),
+    }))
+  }
+
+  /**
+   * Switch to a different session, returning its messages.
+   * Saves the current session first.
+   */
+  async switchToSession(meta: JsonlSessionMetadata, currentMessages: AgentMessage[]): Promise<AgentMessage[]> {
+    // Save current session
+    if (this.session) {
+      await this.saveMessages(currentMessages)
+    }
+
+    // Load target session
+    this.session = await this.repo.open(meta)
+    this.metadata = meta
+    const context = await this.session.buildContext()
+    this.savedMessageCount = context.messages.length
+    return context.messages
   }
 }
