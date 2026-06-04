@@ -193,12 +193,62 @@ compat: { requiresReasoningContentOnAssistantMessages: true, thinkingFormat: 'de
 
 Gemini models use the `google-generative-ai` protocol (no `compat` needed — pi-ai's google provider handles thinking natively via Gemini's `thought: true` part format).
 
-### Adding a New Model
+### Adding a New Model (user-facing — no code changes needed)
 
-To add a new model to microcode-pi:
+To add a custom model, create a JSON config file:
+
+**Location** (merged, project overrides user):
+- `~/.microcode/models.json` — user-level
+- `.microcode/models.json` — project-level
+
+**Format:**
+```json
+{
+  "models": [
+    {
+      "id": "my-gpt-4o",
+      "name": "My GPT-4o",
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "reasoning": false,
+      "input": ["text", "image"],
+      "contextWindow": 128000,
+      "maxTokens": 16384
+    }
+  ]
+}
+```
+
+**Fields:**
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `id` | yes | string | Unique identifier, `/model <id>` to switch |
+| `name` | yes | string | Display name |
+| `api` | yes | string | Protocol: `openai-completions`, `anthropic-messages`, `google-generative-ai` |
+| `baseUrl` | yes | string | API endpoint URL |
+| `contextWindow` | yes | number | Context window size in tokens |
+| `maxTokens` | yes | number | Maximum output tokens |
+| `apiKeyEnv` | no | string | Env var holding the API key (falls back to protocol default) |
+| `reasoning` | no | boolean | Whether model supports reasoning/thinking (default: false) |
+| `thinkingFormat` | no | string | When reasoning=true: `openai`, `deepseek`, `openrouter`, `together`, `zai`, `qwen`, `qwen-chat-template` |
+| `input` | no | string[] | Input modalities: `["text"]` or `["text", "image"]` (default: `["text"]`) |
+| `headers` | no | object | Custom HTTP headers |
+| `cost` | no | object | `{ input, output, cacheRead, cacheWrite }` for display |
+
+**CLI:**
+```
+microcode model list    # List all models (built-in + custom)
+```
+
+Custom models appear in the `/model` list alongside built-in models. Env overrides (`BASE_URL`, `OPENAI_BASE_URL`, etc.) do NOT override custom model baseUrls — the value in config is used as-is.
+
+### Adding a Built-in Model (dev-facing)
+
+To add a new built-in model to the registry:
 
 1. Find the model definition in `pi/packages/ai/src/models.generated.ts` (search by model ID)
-2. Copy the definition into the `MODELS` array in `src/models/registry.ts`, removing the `satisfies Model<...>` type assertion (the array's `as Model<Api>[]` cast covers it)
+2. Copy the definition into the `BUILTIN_MODELS` array in `src/models/registry.ts`, removing the `satisfies Model<...>` type assertion (the array's `as Model<Api>[]` cast covers it)
 3. Set the protocol-appropriate env var (e.g. `OPENAI_API_KEY` for openai-completions models)
 4. Test: set the env var, run with `MODEL=<model-id>`, verify a basic prompt completes
 

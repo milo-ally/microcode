@@ -1,6 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { createMicrocodeAgent } from './agent.ts'
-import { resolveApiKey } from './models/index.ts'
+import { resolveApiKey, getAllModels, getCustomModelDefs } from './models/index.ts'
 import { App } from './tui/app.ts'
 import { McpClientManager } from './mcp/client.ts'
 import { loadMcpConfig, isMcpConfigEmpty } from './mcp/config.ts'
@@ -162,6 +162,33 @@ async function handleMcpList(args: string[]): Promise<void> {
   }
 }
 
+function handleModelList(): void {
+  const all = getAllModels()
+  const customs = getCustomModelDefs()
+  const customIds = new Set(customs.map(c => c.id))
+
+  if (all.length === 0) {
+    console.log('No models available.')
+    return
+  }
+
+  console.log('Available models:\n')
+  for (const m of all) {
+    const isCustom = customIds.has(m.id)
+    const source = isCustom ? '[custom]' : '[built-in]'
+    const keyInfo = (m as any).apiKeyEnv
+      ? ` (key: $${(m as any).apiKeyEnv})`
+      : ` (key: ${m.api === 'openai-completions' ? '$OPENAI_API_KEY' : m.api === 'anthropic-messages' ? '$ANTHROPIC_API_KEY' : m.api === 'google-generative-ai' ? '$GEMINI_API_KEY' : '$API_KEY'})`
+    const reasoning = m.reasoning ? ', reasoning' : ''
+    const vision = m.input.includes('image') ? ', vision' : ''
+
+    console.log(`  ${m.id} ${source}`)
+    console.log(`    ${m.name} | ${m.api} | ${m.baseUrl}`)
+    console.log(`    context: ${m.contextWindow.toLocaleString()}, max tokens: ${m.maxTokens.toLocaleString()}${reasoning}${vision}${keyInfo}`)
+    console.log()
+  }
+}
+
 async function main(): Promise<void> {
   // Set process title for better visibility in process lists
   try {
@@ -208,6 +235,9 @@ MCP Commands:
   mcp remove <name>                      Remove an MCP server
   mcp list                               List configured MCP servers
 
+Model Commands:
+  model list                             List all available models (built-in + custom)
+
   Options for mcp add:
     --scope <user|project>     Config scope (default: project)
     --transport <stdio|sse|http>  Transport type (default: stdio)
@@ -226,6 +256,11 @@ Environment Variables:
   API_KEY               Fallback API key (used with OpenAI-compatible APIs)
   BASE_URL              Fallback base URL
   MODEL                 Fallback model ID
+
+Custom Models:
+  Define custom models in ~/.microcode/models.json (user) or
+  .microcode/models.json (project). See CLAUDE.md for the config format.
+  Custom models appear in /model list alongside built-in ones.
 
 MCP Configuration:
   Place mcp.json in ~/.microcode/ (user) or .microcode/ (project)
@@ -257,6 +292,19 @@ Session Management:
     } else {
       console.error(`Unknown mcp subcommand: ${subcommand}`)
       console.log('Usage: microcode mcp add|remove|list [options] [args...]')
+      process.exit(1)
+    }
+  }
+
+  // Handle model subcommands: microcode model list
+  if (args[0] === 'model') {
+    const subcommand = args[1]
+    if (subcommand === 'list') {
+      handleModelList()
+      process.exit(0)
+    } else {
+      console.error(`Unknown model subcommand: ${subcommand}`)
+      console.log('Usage: microcode model list')
       process.exit(1)
     }
   }
@@ -367,9 +415,13 @@ Session Management:
 
   // Warn if no API key is configured (non-blocking — app still starts)
   if (!resolveApiKey(agent.state.model)) {
-    const provider = (agent.state.model.provider as string).toUpperCase().replace(/-/g, '_')
+    const model = agent.state.model
+    const apiKeyEnv = (model as any).apiKeyEnv as string | undefined
+    const keyHint = apiKeyEnv
+      ? `$${apiKeyEnv}`
+      : `${(model.provider as string).toUpperCase().replace(/-/g, '_')}_API_KEY`
     app.addStartupWarning(
-      `No API key configured. Set ${provider}_API_KEY or API_KEY to enable model responses.`,
+      `No API key configured. Set ${keyHint} or API_KEY to enable model responses.`,
     )
   }
 

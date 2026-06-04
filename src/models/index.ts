@@ -7,8 +7,16 @@ export {
   findModel,
   resolveApiKey,
   getModelConfig,
+  getCustomModelDefs,
   type ModelConfig,
 } from './registry.ts'
+
+export {
+  loadCustomModels,
+  customModelToModel,
+  type CustomModelDef,
+  type CustomModelsConfig,
+} from './custom.ts'
 
 export function modelSupportsImages(model: Model<Api>): boolean {
   return model.input.includes('image')

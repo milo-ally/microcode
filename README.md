@@ -47,9 +47,9 @@ bun run dev        # Start in dev mode (bun source)
 
 ## Configuration
 
-### API Keys
+### API Keys & Model Selection
 
-Set one or more protocol-specific keys. The model's protocol determines which key is used.
+Set the env var for your model's protocol. The model's API protocol determines which key is used:
 
 | Protocol             | API Key            | Base URL           | Model           |
 |----------------------|--------------------|--------------------|-----------------|
@@ -58,23 +58,58 @@ Set one or more protocol-specific keys. The model's protocol determines which ke
 | google-generative-ai | `GEMINI_API_KEY`   | `GEMINI_BASE_URL`  | `GEMINI_MODEL`  |
 | any (fallback)       | `API_KEY`          | `BASE_URL`         | `MODEL`         |
 
-DeepSeek and MiMo use the OpenAI protocol. Gemini models use the Gemini protocol.
-Multiple protocols can be configured simultaneously.
-
-### Model Selection
-
-Set the model env var for the corresponding protocol. For example, to use Gemini:
-
-```bash
-export GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
-export GEMINI_API_KEY=your-key
-export GEMINI_MODEL=your-gemini-model
-microcode
-```
-
 Built-in models: `deepseek-v4-pro`, `deepseek-v4-flash`, `mimo-v2.5`, `mimo-v2.5-pro`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`.
 
-You can also switch models at runtime with the `/model` slash command.
+Switch models at runtime with the `/model` slash command, or use the `--model` CLI flag:
+
+```bash
+microcode --model gemini-2.5-flash
+```
+
+### Custom Models
+
+Define your own models in `~/.microcode/models.json` (user-level) or `.microcode/models.json` (project-level). Project overrides user for models with the same ID.
+
+```json
+{
+  "models": [
+    {
+      "id": "my-model",
+      "name": "My Model",
+      "api": "openai-completions",
+      "baseUrl": "https://api.example.com/v1",
+      "apiKeyEnv": "MY_API_KEY",
+      "reasoning": false,
+      "input": ["text"],
+      "contextWindow": 128000,
+      "maxTokens": 4096
+    }
+  ]
+}
+```
+
+**Fields:**
+
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `id` | yes | string | Unique identifier. `/model <id>` to switch. Same ID as a built-in model overrides it. |
+| `name` | yes | string | Display name shown in `/model` list |
+| `api` | yes | string | Protocol: `openai-completions`, `anthropic-messages`, `google-generative-ai` |
+| `baseUrl` | yes | string | API endpoint URL (not affected by env var overrides) |
+| `contextWindow` | yes | number | Context window size in tokens |
+| `maxTokens` | yes | number | Maximum output tokens |
+| `apiKeyEnv` | no | string | Env var holding the API key. Falls back to protocol default if unset. |
+| `reasoning` | no | boolean | Whether the model supports reasoning/thinking (default: `false`) |
+| `thinkingFormat` | no | string | When `reasoning: true`: `openai`, `deepseek`, `openrouter`, `together`, `zai`, `qwen`, `qwen-chat-template` |
+| `input` | no | string[] | Input modalities: `["text"]` or `["text", "image"]` (default: `["text"]`) |
+| `headers` | no | object | Custom HTTP headers added to each request |
+| `cost` | no | object | `{ "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }` for display only |
+
+Custom models appear in the `/model` list alongside built-in ones. You can also list all models from the command line:
+
+```bash
+microcode model list
+```
 
 ### MCP Servers
 

@@ -7,12 +7,13 @@
  */
 
 import { type Api, type Model } from '@earendil-works/pi-ai'
+import { loadCustomModels, customModelToModel, type CustomModelDef } from './custom.ts'
 
 // ============================================================================
 // Model definitions (from models.generated.ts)
 // ============================================================================
 
-const MODELS: Model<Api>[] = [
+const BUILTIN_MODELS: Model<Api>[] = [
 
   // --- deepseek provider (openai format) ---
   {
@@ -170,7 +171,17 @@ const MODELS: Model<Api>[] = [
 ] as Model<Api>[]
 
 // Default model when no env var is set
-const DEFAULT_MODEL_ID = MODELS[0].id
+const DEFAULT_MODEL_ID = BUILTIN_MODELS[0].id
+
+// Custom models cache — loaded once at startup
+let _customModels: Model<Api>[] | null = null
+
+function getCustomModels(): Model<Api>[] {
+  if (_customModels === null) {
+    _customModels = loadCustomModels().map(customModelToModel)
+  }
+  return _customModels
+}
 
 // Env var names for model selection
 const MODEL_ENV_KEYS = ['OPENAI_MODEL', 'ANTHROPIC_MODEL', 'GEMINI_MODEL', 'MODEL'] as const
@@ -195,6 +206,9 @@ function findEnvValue(keys: readonly string[]): string | undefined {
  * - GEMINI_BASE_URL: only for google-generative-ai models
  */
 function applyEnvOverrides(model: Model<Api>): Model<Api> {
+  // Custom models: skip env overrides (user explicitly set baseUrl in config)
+  if (model.provider === 'custom') return model
+
   // Global override — applies unconditionally
   const globalBase = getEnv('BASE_URL')
   if (globalBase) return { ...model, baseUrl: globalBase }
@@ -234,9 +248,28 @@ let _currentModel: Model<Api> | undefined
 
 /**
  * Get all available models (with env overrides applied).
+ * Custom models with the same ID override built-in ones.
  */
 export function getAllModels(): Model<Api>[] {
-  return MODELS.map(applyEnvOverrides)
+  const customModels = getCustomModels()
+  const customIds = new Set(customModels.map(m => m.id))
+
+  // Built-in models, skipping those overridden by custom models
+  const builtins = BUILTIN_MODELS
+    .filter(m => !customIds.has(m.id))
+    .map(applyEnvOverrides)
+
+  // Custom models also get env overrides applied
+  const customs = customModels.map(applyEnvOverrides)
+
+  return [...builtins, ...customs]
+}
+
+/**
+ * Get only custom model definitions (raw, before env override).
+ */
+export function getCustomModelDefs(): CustomModelDef[] {
+  return loadCustomModels()
 }
 
 /**
@@ -269,13 +302,13 @@ export function getCurrentModel(): Model<Api> {
   let candidates: Model<Api>[]
 
   if (envModelId) {
-    candidates = MODELS.filter((m) => m.id === envModelId)
+    candidates = getAllModels().filter((m) => m.id === envModelId)
     if (candidates.length === 0) {
       // Fallback: partial match
-      candidates = MODELS.filter((m) => m.id.includes(envModelId) || envModelId.includes(m.id))
+      candidates = getAllModels().filter((m) => m.id.includes(envModelId) || envModelId.includes(m.id))
     }
   } else {
-    candidates = MODELS.filter((m) => m.id === DEFAULT_MODEL_ID)
+    candidates = getAllModels().filter((m) => m.id === DEFAULT_MODEL_ID)
   }
 
   if (candidates.length === 0) {
@@ -318,8 +351,15 @@ export function findModel(modelId: string, api?: Api): Model<Api> | undefined {
 /**
  * Resolve API key by the model's API protocol.
  * Each protocol has one env var, with API_KEY as universal fallback.
+ * Custom models can specify apiKeyEnv to use a specific env var.
  */
 export function resolveApiKey(model: Model<Api>): string | undefined {
+  // Custom model with explicit env var
+  const apiKeyEnv = (model as any).apiKeyEnv as string | undefined
+  if (apiKeyEnv) {
+    return getEnv(apiKeyEnv) ?? getEnv('API_KEY')
+  }
+
   const keyByApi: Partial<Record<Api, string>> = {
     'openai-completions': getEnv('OPENAI_API_KEY'),
     'anthropic-messages': getEnv('ANTHROPIC_API_KEY'),
