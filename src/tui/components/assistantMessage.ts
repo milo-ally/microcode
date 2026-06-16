@@ -1,7 +1,8 @@
-import { Container, Markdown, type MarkdownTheme, Text } from '@earendil-works/pi-tui'
+import { Container, type MarkdownTheme } from '@earendil-works/pi-tui'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import { getMarkdownTheme } from '../theme.ts'
 import { ThinkingBlock } from './thinkingBlock.ts'
+import { Markdown } from './markdown.ts'
 
 type BlockComponent = { type: 'text'; component: Markdown } | { type: 'thinking'; component: ThinkingBlock }
 
@@ -42,7 +43,7 @@ export class AssistantMessageComponent extends Container {
 
       for (const block of blocks) {
         if (block.type === 'text') {
-          const md = new Markdown(block.text.trim() || ' ', 1, 0, this.markdownTheme)
+          const md = new Markdown(block.text.trim() ? block.text : ' ', 1, 0, this.markdownTheme)
           this.addChild(md)
           this.blockComponents.push({ type: 'text', component: md })
         } else if (block.type === 'thinking') {
@@ -65,7 +66,7 @@ export class AssistantMessageComponent extends Container {
 
       if (lastBlock && lastComponent) {
         if (lastBlock.type === 'text' && lastComponent.type === 'text' && text !== this.lastText) {
-          const newMd = new Markdown(lastBlock.text.trim() || ' ', 1, 0, this.markdownTheme)
+          const newMd = new Markdown(lastBlock.text.trim() ? lastBlock.text : ' ', 1, 0, this.markdownTheme)
           this.removeChild(lastComponent.component)
           this.addChild(newMd)
           this.blockComponents[this.blockComponents.length - 1] = { type: 'text', component: newMd }

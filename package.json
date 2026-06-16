@@ -24,6 +24,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "chalk": "^5.5.0",
     "diff": "^9.0.0",
+    "marked": "^15.0.12",
     "typebox": "^1.1.24"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
-import { Box, Container, Markdown, Text } from '@earendil-works/pi-tui'
+import { Box, Container, Text } from '@earendil-works/pi-tui'
 import { theme, getMarkdownTheme } from '../theme.ts'
 import type { ImageContent } from '@earendil-works/pi-ai'
+import { Markdown } from './markdown.ts'
 
 /**
  * Component that renders a user message with grey background (matching pi-coding-agent).
