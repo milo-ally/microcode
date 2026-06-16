@@ -1,9 +1,9 @@
 /**
- * Custom model loader — reads user-defined models from JSON config files.
+ * Custom model loader — reads user-defined models from the Microcode config.
  *
  * Two locations (merged, project overrides user):
- *   ~/.microcode/models.json   (user-level)
- *   .microcode/models.json     (project-level)
+ *   ~/.microcode/config.json   (user-level)
+ *   .microcode/config.json     (project-level)
  *
  * Format:
  *   { "models": [{ id, name, api, baseUrl, apiKeyEnv?, reasoning?, thinkingFormat?, ... }] }
@@ -44,11 +44,11 @@ export interface CustomModelsConfig {
 // ============================================================================
 
 function userConfigPath(): string {
-  return join(homedir(), '.microcode', 'models.json')
+  return join(homedir(), '.microcode', 'config.json')
 }
 
 function projectConfigPath(cwd: string): string {
-  return join(cwd, '.microcode', 'models.json')
+  return join(cwd, '.microcode', 'config.json')
 }
 
 // ============================================================================

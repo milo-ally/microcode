@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { McpConfig, McpServerConfig } from './types.ts'
+import type { McpServerConfig } from './types.ts'
 
 async function readJsonFile(path: string): Promise<any> {
   try {
@@ -13,11 +13,11 @@ async function readJsonFile(path: string): Promise<any> {
 }
 
 export function getUserConfigPath(): string {
-  return join(homedir(), '.microcode', 'mcp.json')
+  return join(homedir(), '.microcode', 'config.json')
 }
 
 export function getProjectConfigPath(cwd: string): string {
-  return join(cwd, '.microcode', 'mcp.json')
+  return join(cwd, '.microcode', 'config.json')
 }
 
 export async function loadMcpConfig(

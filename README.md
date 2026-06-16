@@ -68,7 +68,7 @@ microcode --model gemini-2.5-flash
 
 ### Custom Models
 
-Define your own models in `~/.microcode/models.json` (user-level) or `.microcode/models.json` (project-level). Project overrides user for models with the same ID.
+Define your own models in `~/.microcode/config.json` (user-level) or `.microcode/config.json` (project-level). Project overrides user for models with the same ID.
 
 ```json
 {
@@ -113,7 +113,7 @@ microcode model list
 
 ### MCP Servers
 
-Place an `mcp.json` in `~/.microcode/` (user-level) or `.microcode/` (project-level):
+Add MCP servers to `~/.microcode/config.json` (user-level) or `.microcode/config.json` (project-level):
 
 ```json
 {

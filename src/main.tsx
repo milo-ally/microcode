@@ -258,12 +258,12 @@ Environment Variables:
   MODEL                 Fallback model ID
 
 Custom Models:
-  Define custom models in ~/.microcode/models.json (user) or
-  .microcode/models.json (project). See CLAUDE.md for the config format.
+  Define custom models in ~/.microcode/config.json (user) or
+  .microcode/config.json (project). See CLAUDE.md for the config format.
   Custom models appear in /model list alongside built-in ones.
 
 MCP Configuration:
-  Place mcp.json in ~/.microcode/ (user) or .microcode/ (project)
+  Place config.json in ~/.microcode/ (user) or .microcode/ (project)
   with a "mcpServers" key containing server definitions.
   Or use 'microcode mcp add' to add servers from the command line.
 

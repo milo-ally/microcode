@@ -142,5 +142,5 @@ export function parseHeaders(headerArray: string[]): Record<string, string> {
 export function getScopeDescription(scope: ConfigScope): string {
   return scope === 'user'
     ? getUserConfigPath()
-    : `project .microcode/mcp.json`
+    : `project .microcode/config.json`
 }

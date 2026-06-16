@@ -198,8 +198,8 @@ Gemini models use the `google-generative-ai` protocol (no `compat` needed — pi
 To add a custom model, create a JSON config file:
 
 **Location** (merged, project overrides user):
-- `~/.microcode/models.json` — user-level
-- `.microcode/models.json` — project-level
+- `~/.microcode/config.json` — user-level
+- `.microcode/config.json` — project-level
 
 **Format:**
 ```json
