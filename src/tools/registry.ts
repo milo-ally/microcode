@@ -10,6 +10,8 @@ import type { PermissionBehavior } from '../permissions/types.ts'
 export interface ToolUIComponent extends Component {
   setExpanded(expanded: boolean): void
   markExecutionStarted(): void
+  updateArgs?(args: Record<string, unknown>): void
+  updateElapsed?(elapsedMs: number): void
   updateResult(result: ToolResult, isPartial?: boolean): void
   updateDetails?(details: Record<string, unknown>): void
 }

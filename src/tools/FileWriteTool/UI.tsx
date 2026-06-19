@@ -5,13 +5,16 @@ import { Box, Container, Text, type Component } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
 import {
-  generateDiff,
-  renderDiffPreview,
-  renderFullDiff,
   renderChangeSummary,
   renderNewFilePreview,
-  type DiffResult,
 } from '../../utils/diffUtils.ts'
+import {
+  countContentLines,
+  formatBytes,
+  formatCompletedStatus,
+  formatRunningStatus,
+  getProgressFrame,
+} from '../../tui/toolPresentation.ts'
 
 interface ToolResult {
   content: Array<{ type: string; text?: string }>
@@ -21,21 +24,22 @@ interface ToolResult {
 interface FileWriteDetails {
   path?: string
   bytesWritten?: number
-  oldContent?: string
-  newContent?: string
+  additions?: number
+  removals?: number
+  isNewFile?: boolean
+  preview?: string
+  phase?: 'preparing' | 'writing' | 'complete'
 }
 
-const COLLAPSED_MAX_HUNKS = 2
-const COLLAPSED_PREVIEW_LINES = 12
 const NEW_FILE_PREVIEW_LINES = 8
 
 export class FileWriteToolUI extends Container {
   private args: any
   private expanded = false
   private executionStarted = false
+  private elapsedMs = 0
   private result?: ToolResult
   private details?: FileWriteDetails
-  private diffResult?: DiffResult
   private contentBox: Box
 
   constructor(toolCallId: string, args: any) {
@@ -56,6 +60,16 @@ export class FileWriteToolUI extends Container {
     this.rebuild()
   }
 
+  updateArgs(args: Record<string, unknown>): void {
+    this.args = args
+    this.rebuild()
+  }
+
+  updateElapsed(elapsedMs: number): void {
+    this.elapsedMs = elapsedMs
+    this.rebuild()
+  }
+
   updateResult(result: ToolResult, isPartial = false): void {
     this.result = result
     if (!isPartial) {
@@ -66,29 +80,23 @@ export class FileWriteToolUI extends Container {
 
   updateDetails(details: FileWriteDetails): void {
     this.details = details
-    if (details.oldContent !== undefined && details.newContent !== undefined) {
-      const filePath = details.path || this.args?.file_path || 'file'
-      this.diffResult = generateDiff(details.oldContent, details.newContent, filePath)
-    } else {
-      this.diffResult = undefined
-    }
     this.rebuild()
   }
 
   private rebuild(): void {
-    const bgFn = this.result
+    const bgFn = this.result && !this.executionStarted
       ? this.result.isError
         ? (text: string) => theme.bg('toolErrorBg', text)
         : (text: string) => theme.bg('toolSuccessBg', text)
       : (text: string) => theme.bg('toolPendingBg', text)
     this.contentBox.setBgFn(bgFn)
 
-    const icon = this.result
+    const icon = this.result && !this.executionStarted
       ? this.result.isError
         ? theme.fg('error', '✗')
         : theme.fg('success', '✓')
       : this.executionStarted
-        ? theme.fg('warning', '⚙')
+        ? theme.fg('warning', getProgressFrame(this.elapsedMs))
         : theme.dim('○')
 
     const filePath = this.details?.path || this.args?.file_path || ''
@@ -98,35 +106,42 @@ export class FileWriteToolUI extends Container {
     this.contentBox.clear()
 
     if (!this.result) {
-      this.contentBox.addChild(new Text(`${header} ${theme.dim('running…')}`))
+      if (this.details?.phase === 'preparing') {
+        const additions = this.details.additions ?? 0
+        const bytes = this.details.bytesWritten ?? 0
+        const summary = this.details.isNewFile
+          ? renderChangeSummary(additions, 0)
+          : theme.fg('muted', `${additions} generated line${additions === 1 ? '' : 's'}`)
+        this.contentBox.addChild(
+          new Text(`${header} ${theme.dim('preparing')}\n  ${summary} ${theme.dim(`· ${formatBytes(bytes)}`)}`),
+        )
+      } else {
+        this.contentBox.addChild(new Text(`${header} ${theme.dim(formatRunningStatus(this.elapsedMs))}`))
+      }
       return
     }
 
-    if (this.diffResult) {
-      // Existing file updated — show diff
-      const { additions, removals } = this.diffResult
+    if (this.details && !this.details.isNewFile) {
+      const additions = this.details.additions ?? 0
+      const removals = this.details.removals ?? 0
       const summary = renderChangeSummary(additions, removals)
-      const lines: string[] = [header, `  ${summary}`]
-
-      const diffLines = this.expanded
-        ? renderFullDiff(this.diffResult.patch, 80)
-        : renderDiffPreview(this.diffResult.patch, 80, COLLAPSED_MAX_HUNKS, COLLAPSED_PREVIEW_LINES)
-
-      for (const line of diffLines) {
-        lines.push(`  ${line}`)
-      }
-
-      if (!this.expanded && this.diffResult.patch.hunks.length > COLLAPSED_MAX_HUNKS) {
-        lines.push(theme.dim('  (expand to see full diff)'))
-      }
-
+      const bytes = this.details?.bytesWritten
+      const byteInfo = bytes === undefined ? '' : ` · ${formatBytes(bytes)}`
+      const lines: string[] = [
+        `${header} ${theme.dim(this.executionStarted ? 'writing' : formatCompletedStatus(this.elapsedMs))}`,
+        `  ${summary || theme.dim('no changes')}${theme.dim(byteInfo)}`,
+      ]
       this.contentBox.addChild(new Text(lines.join('\n')))
-    } else if (this.details?.newContent) {
+    } else if (this.details?.isNewFile) {
       // New file — show syntax preview
-      const content = this.details.newContent
-      const lineCount = content.split('\n').length
-      const summary = theme.fg('muted', `${lineCount} line${lineCount === 1 ? '' : 's'}`)
-      const lines: string[] = [header, `  ${summary}`]
+      const content = this.details.preview ?? ''
+      const lineCount = this.details.additions ?? countContentLines(content)
+      const bytes = this.details.bytesWritten ?? Buffer.byteLength(content, 'utf8')
+      const summary = renderChangeSummary(lineCount, 0)
+      const lines: string[] = [
+        `${header} ${theme.dim(this.executionStarted ? 'writing' : formatCompletedStatus(this.elapsedMs))}`,
+        `  ${summary} ${theme.dim(`· ${formatBytes(bytes)} · new file`)}`,
+      ]
 
       const previewLines = renderNewFilePreview(content, this.expanded ? 50 : NEW_FILE_PREVIEW_LINES)
       for (const line of previewLines) {
@@ -137,7 +152,7 @@ export class FileWriteToolUI extends Container {
     } else {
       // Fallback
       const output = this.getOutputPreview()
-      this.contentBox.addChild(new Text(`${header}\n  ${theme.fg('muted', output)}`))
+      this.contentBox.addChild(new Text(`${header} ${theme.dim(formatCompletedStatus(this.elapsedMs))}\n  ${theme.fg('muted', output || 'completed with no output')}`))
     }
   }
 

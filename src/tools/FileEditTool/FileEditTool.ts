@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'fs/promises'
 import { isAbsolute, resolve } from 'path'
 import { Type, type Static } from 'typebox'
 import type { PermissionBehavior } from '../../permissions/types.ts'
+import { countLineChanges } from '../../utils/diffUtils.ts'
 
 export const TOOL_NAME = 'edit'
 export const TOOL_DEFAULT_PERMISSION: PermissionBehavior = 'ask'
@@ -21,8 +22,9 @@ export type FileEditToolInput = Static<typeof editSchema>
 export interface FileEditToolDetails {
   path: string
   replacements: number
-  oldContent?: string
-  newContent?: string
+  additions: number
+  removals: number
+  phase?: 'writing' | 'complete'
 }
 
 export function createFileEditTool(cwd: string): AgentTool<typeof editSchema, FileEditToolDetails> {
@@ -35,6 +37,8 @@ export function createFileEditTool(cwd: string): AgentTool<typeof editSchema, Fi
     async execute(
       _toolCallId: string,
       params: FileEditToolInput,
+      _signal?: AbortSignal,
+      onUpdate?: (partial: AgentToolResult<FileEditToolDetails>) => void,
     ): Promise<AgentToolResult<FileEditToolDetails>> {
       const filePath = isAbsolute(params.file_path)
         ? params.file_path
@@ -54,6 +58,16 @@ export function createFileEditTool(cwd: string): AgentTool<typeof editSchema, Fi
           throw new Error(`old_string not found in ${filePath}`)
         }
         const newContent = content.replaceAll(params.old_string, params.new_string)
+        const changes = countLineChanges(content, newContent)
+        onUpdate?.({
+          content: [{ type: 'text', text: `Editing ${filePath}` }],
+          details: {
+            path: filePath,
+            replacements: count,
+            ...changes,
+            phase: 'writing',
+          },
+        })
         await writeFile(filePath, newContent, 'utf-8')
         return {
           content: [
@@ -62,7 +76,12 @@ export function createFileEditTool(cwd: string): AgentTool<typeof editSchema, Fi
               text: `Replaced ${count} occurrence(s) in ${filePath}`,
             },
           ],
-          details: { path: filePath, replacements: count, oldContent: content, newContent },
+          details: {
+            path: filePath,
+            replacements: count,
+            ...changes,
+            phase: 'complete',
+          },
         }
       }
 
@@ -79,6 +98,16 @@ export function createFileEditTool(cwd: string): AgentTool<typeof editSchema, Fi
       }
 
       const newContent = content.replace(params.old_string, params.new_string)
+      const changes = countLineChanges(content, newContent)
+      onUpdate?.({
+        content: [{ type: 'text', text: `Editing ${filePath}` }],
+        details: {
+          path: filePath,
+          replacements: 1,
+          ...changes,
+          phase: 'writing',
+        },
+      })
       await writeFile(filePath, newContent, 'utf-8')
 
       return {
@@ -88,7 +117,12 @@ export function createFileEditTool(cwd: string): AgentTool<typeof editSchema, Fi
             text: `Replaced 1 occurrence in ${filePath}`,
           },
         ],
-        details: { path: filePath, replacements: 1, oldContent: content, newContent },
+        details: {
+          path: filePath,
+          replacements: 1,
+          ...changes,
+          phase: 'complete',
+        },
       }
     },
   }

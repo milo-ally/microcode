@@ -4,6 +4,7 @@ import { h, Fragment } from '../../tui/jsxFactory.ts'
 import { Box, Container, Text, type Component } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
+import { formatCompletedStatus, formatRunningStatus, getProgressFrame } from '../../tui/toolPresentation.ts'
 
 interface ToolResult {
   content: Array<{ type: string; text?: string }>
@@ -21,6 +22,7 @@ export class FileReadToolUI extends Container {
   private args: any
   private expanded = false
   private executionStarted = false
+  private elapsedMs = 0
   private result?: ToolResult
   private details?: FileReadDetails
   private contentBox: Box
@@ -43,6 +45,11 @@ export class FileReadToolUI extends Container {
     this.rebuild()
   }
 
+  updateElapsed(elapsedMs: number): void {
+    this.elapsedMs = elapsedMs
+    this.rebuild()
+  }
+
   updateResult(result: ToolResult, isPartial = false): void {
     this.result = result
     if (!isPartial) {
@@ -57,19 +64,19 @@ export class FileReadToolUI extends Container {
   }
 
   private rebuild(): void {
-    const bgFn = this.result
+    const bgFn = this.result && !this.executionStarted
       ? this.result.isError
         ? (text: string) => theme.bg('toolErrorBg', text)
         : (text: string) => theme.bg('toolSuccessBg', text)
       : (text: string) => theme.bg('toolPendingBg', text)
     this.contentBox.setBgFn(bgFn)
 
-    const icon = this.result
+    const icon = this.result && !this.executionStarted
       ? this.result.isError
         ? theme.fg('error', '✗')
         : theme.fg('success', '✓')
       : this.executionStarted
-        ? theme.fg('warning', '⚙')
+        ? theme.fg('warning', getProgressFrame(this.elapsedMs))
         : theme.dim('○')
 
     const filePath = this.details?.path || this.args?.file_path || ''
@@ -79,7 +86,7 @@ export class FileReadToolUI extends Container {
     this.contentBox.clear()
 
     if (!this.result) {
-      this.contentBox.addChild(new Text(`${header} ${theme.dim('running…')}`))
+      this.contentBox.addChild(new Text(`${header} ${theme.dim(formatRunningStatus(this.elapsedMs))}`))
       return
     }
 
@@ -92,13 +99,13 @@ export class FileReadToolUI extends Container {
         ? `${returnedLines}/${totalLines} lines ${theme.dim('(truncated)')}`
         : `${returnedLines} lines`
       const summary = theme.fg('muted', lineInfo)
-      this.contentBox.addChild(new Text(`${header}  ${summary}`))
+      this.contentBox.addChild(new Text(`${header}  ${summary} ${theme.dim(`· ${formatCompletedStatus(this.elapsedMs)}`)}`))
     } else {
       const output = this.result.content
         ?.filter((c) => c.type === 'text')
         .map((c) => (c.text ?? '').slice(0, 200).replace(/\n/g, ' '))
         .join(' ') ?? ''
-      this.contentBox.addChild(new Text(`${header}\n  ${theme.fg('muted', output)}`))
+      this.contentBox.addChild(new Text(`${header} ${theme.dim(formatCompletedStatus(this.elapsedMs))}\n  ${theme.fg('muted', output || 'completed with no output')}`))
     }
   }
 }

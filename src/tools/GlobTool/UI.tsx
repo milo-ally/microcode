@@ -4,6 +4,7 @@ import { h, Fragment } from '../../tui/jsxFactory.ts'
 import { Box, Container, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
+import { formatCompletedStatus, formatRunningStatus, getProgressFrame } from '../../tui/toolPresentation.ts'
 
 interface ToolResult {
   content: Array<{ type: string; text?: string }>
@@ -21,6 +22,7 @@ export class GlobToolUI extends Container {
   private args: any
   private expanded = false
   private executionStarted = false
+  private elapsedMs = 0
   private result?: ToolResult
   private details?: GlobDetails
   private contentBox: Box
@@ -43,6 +45,11 @@ export class GlobToolUI extends Container {
     this.rebuild()
   }
 
+  updateElapsed(elapsedMs: number): void {
+    this.elapsedMs = elapsedMs
+    this.rebuild()
+  }
+
   updateResult(result: ToolResult, isPartial = false): void {
     this.result = result
     if (!isPartial) {
@@ -57,19 +64,19 @@ export class GlobToolUI extends Container {
   }
 
   private rebuild(): void {
-    const bgFn = this.result
+    const bgFn = this.result && !this.executionStarted
       ? this.result.isError
         ? (text: string) => theme.bg('toolErrorBg', text)
         : (text: string) => theme.bg('toolSuccessBg', text)
       : (text: string) => theme.bg('toolPendingBg', text)
     this.contentBox.setBgFn(bgFn)
 
-    const icon = this.result
+    const icon = this.result && !this.executionStarted
       ? this.result.isError
         ? theme.fg('error', '✗')
         : theme.fg('success', '✓')
       : this.executionStarted
-        ? theme.fg('warning', '⚙')
+        ? theme.fg('warning', getProgressFrame(this.elapsedMs))
         : theme.dim('○')
 
     const pattern = this.args?.pattern || '...'
@@ -78,7 +85,7 @@ export class GlobToolUI extends Container {
     this.contentBox.clear()
 
     if (!this.result) {
-      this.contentBox.addChild(new Text(`${icon} ${chalk.bold('Glob')} ${theme.fg('accent', shortPattern)} ${theme.dim('running…')}`))
+      this.contentBox.addChild(new Text(`${icon} ${chalk.bold('Glob')} ${theme.fg('accent', shortPattern)} ${theme.dim(formatRunningStatus(this.elapsedMs))}`))
       return
     }
 
@@ -89,7 +96,7 @@ export class GlobToolUI extends Container {
       const fileInfo = truncated
         ? `${numFiles} files ${theme.dim('(truncated)')}`
         : `${numFiles} files`
-      this.contentBox.addChild(new Text(`${icon} ${chalk.bold('Glob')} ${theme.fg('accent', shortPattern)}  ${theme.fg('muted', fileInfo)}`))
+      this.contentBox.addChild(new Text(`${icon} ${chalk.bold('Glob')} ${theme.fg('accent', shortPattern)}  ${theme.fg('muted', fileInfo)} ${theme.dim(`· ${formatCompletedStatus(this.elapsedMs)}`)}`))
     } else {
       const output = this.result.content
         ?.filter((c) => c.type === 'text')

@@ -1,4 +1,4 @@
-import { structuredPatch, type ParsedDiff, type Hunk } from 'diff'
+import { diffLines, structuredPatch, type ParsedDiff, type Hunk } from 'diff'
 import chalk from 'chalk'
 
 export interface DiffResult {
@@ -10,6 +10,37 @@ export interface DiffResult {
 export interface ChangeCounts {
   additions: number
   removals: number
+}
+
+const MAX_EXACT_DIFF_CHARS = 1_000_000
+
+function countLines(content: string): number {
+  if (content.length === 0) return 0
+  let lines = 1
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) === 10) lines++
+  }
+  return content.endsWith('\n') ? lines - 1 : lines
+}
+
+export function countLineChanges(oldContent: string, newContent: string): ChangeCounts {
+  if (oldContent.length + newContent.length > MAX_EXACT_DIFF_CHARS) {
+    return {
+      additions: countLines(newContent),
+      removals: countLines(oldContent),
+    }
+  }
+
+  let additions = 0
+  let removals = 0
+
+  for (const change of diffLines(oldContent, newContent)) {
+    const count = change.count ?? 0
+    if (change.added) additions += count
+    if (change.removed) removals += count
+  }
+
+  return { additions, removals }
 }
 
 const CONTEXT_LINES = 3

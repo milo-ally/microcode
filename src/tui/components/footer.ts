@@ -47,12 +47,14 @@ export class FooterComponent implements Component {
   private contextTokens: number | null = null
   private contextWindow: number | null = null
   private sessionTitle: string | null = null
+  private gitBranch: string | null
 
   constructor(agent: Agent, modelId: string, provider: string, cwd: string, thinkingLevel?: ThinkingLevel) {
     this.agent = agent
     this.modelId = modelId
     this.provider = provider
     this.cwd = cwd
+    this.gitBranch = getGitBranch(cwd)
     if (thinkingLevel) this.thinkingLevel = thinkingLevel
   }
 
@@ -95,9 +97,8 @@ export class FooterComponent implements Component {
     }
 
     // Add git branch
-    const branch = getGitBranch(this.cwd)
-    if (branch) {
-      pwd = `${pwd} (${branch})`
+    if (this.gitBranch) {
+      pwd = `${pwd} (${this.gitBranch})`
     }
 
     const statsParts: string[] = []

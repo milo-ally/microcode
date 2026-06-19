@@ -1,6 +1,11 @@
 import { Box, type Component, Container, Spacer, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../theme.ts'
+import {
+  formatCompletedStatus,
+  formatRunningStatus,
+  getProgressFrame,
+} from '../toolPresentation.ts'
 
 interface ToolResult {
   content: Array<{ type: string; text?: string }>
@@ -16,6 +21,7 @@ export class ToolExecutionComponent extends Container {
   private args: any
   private expanded = false
   private executionStarted = false
+  private elapsedMs = 0
   private result?: ToolResult
   private contentBox: Box
 
@@ -41,14 +47,21 @@ export class ToolExecutionComponent extends Container {
     this.updateDisplay()
   }
 
-  updateArgs(args: any): void {
+  updateElapsed(elapsedMs: number): void {
+    this.elapsedMs = elapsedMs
+    this.updateDisplay()
+  }
+
+  updateArgs(args: Record<string, unknown>): void {
     this.args = args
     this.updateDisplay()
   }
 
   updateResult(result: ToolResult, isPartial = false): void {
     this.result = result
-    this.executionStarted = false
+    if (!isPartial) {
+      this.executionStarted = false
+    }
     this.updateDisplay()
   }
 
@@ -67,7 +80,7 @@ export class ToolExecutionComponent extends Container {
         ? chalk.hex('#cc6666')('✗')
         : chalk.hex('#b5bd68')('✓')
       : this.executionStarted
-        ? chalk.hex('#ffff00')('⚙')
+        ? chalk.hex('#ffff00')(getProgressFrame(this.elapsedMs))
         : chalk.hex('#666666')('○')
 
     const argsStr = this.formatArgs(this.args)
@@ -76,12 +89,21 @@ export class ToolExecutionComponent extends Container {
     let content: string
     if (this.result) {
       const output = this.getOutputText()
-      const preview = this.expanded
-        ? output
-        : output.slice(0, 300).replace(/\n/g, ' ')
-      content = `${header}\n${chalk.hex('#808080')(preview)}`
+      if (this.executionStarted) {
+        const preview = output
+          ? (this.expanded ? output : output.slice(0, 300).replace(/\n/g, ' '))
+          : formatRunningStatus(this.elapsedMs)
+        content = `${header}\n${chalk.hex('#808080')(preview)}`
+      } else if (output.trim()) {
+        const preview = this.expanded
+          ? output
+          : output.slice(0, 300).replace(/\n/g, ' ')
+        content = `${header} ${chalk.hex('#666666')(formatCompletedStatus(this.elapsedMs))}\n${chalk.hex('#808080')(preview)}`
+      } else {
+        content = `${header} ${chalk.hex('#808080')(`completed with no output · ${formatCompletedStatus(this.elapsedMs)}`)}`
+      }
     } else {
-      content = `${header} ${chalk.hex('#666666')('running...')}`
+      content = `${header} ${chalk.hex('#666666')(formatRunningStatus(this.elapsedMs))}`
     }
 
     // Replace content in box

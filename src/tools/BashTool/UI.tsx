@@ -4,6 +4,7 @@ import { h, Fragment } from '../../tui/jsxFactory.ts'
 import { Box, Container, Text, type Component } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
+import { formatCompletedStatus, formatRunningStatus, getProgressFrame } from '../../tui/toolPresentation.ts'
 
 import type { ToolUIComponent, ToolResult } from '../registry.ts'
 
@@ -20,6 +21,7 @@ export class BashToolUI extends Container implements ToolUIComponent {
   private args: any
   private expanded = false
   private executionStarted = false
+  private elapsedMs = 0
   private result?: ToolResult
   private details?: BashDetails
   private contentBox: Box
@@ -39,6 +41,16 @@ export class BashToolUI extends Container implements ToolUIComponent {
 
   markExecutionStarted(): void {
     this.executionStarted = true
+    this.rebuild()
+  }
+
+  updateArgs(args: Record<string, unknown>): void {
+    this.args = args
+    this.rebuild()
+  }
+
+  updateElapsed(elapsedMs: number): void {
+    this.elapsedMs = elapsedMs
     this.rebuild()
   }
 
@@ -68,7 +80,7 @@ export class BashToolUI extends Container implements ToolUIComponent {
         ? theme.fg('error', '✗')   // ✗
         : theme.fg('success', '✓')  // ✓
       : this.executionStarted
-        ? theme.fg('warning', '⚙')  // ⚙
+        ? theme.fg('warning', getProgressFrame(this.elapsedMs))
         : theme.dim('○')            // ○
 
     const cmd = this.args?.command ?? ''
@@ -83,7 +95,7 @@ export class BashToolUI extends Container implements ToolUIComponent {
     this.contentBox.clear()
 
     if (!this.result) {
-      this.contentBox.addChild(new Text(`${header} ${theme.dim('running…')}`))
+      this.contentBox.addChild(new Text(`${header} ${theme.dim(formatRunningStatus(this.elapsedMs))}`))
       return
     }
 
@@ -92,7 +104,8 @@ export class BashToolUI extends Container implements ToolUIComponent {
 
     if (lines.length === 0 || (lines.length === 1 && !lines[0])) {
       const exitLine = this.renderExitCode()
-      this.contentBox.addChild(new Text(exitLine ? `${header}\n${exitLine}` : header))
+      const status = theme.dim(formatCompletedStatus(this.elapsedMs))
+      this.contentBox.addChild(new Text(exitLine ? `${header} ${status}\n${exitLine}` : `${header} ${status}`))
       return
     }
 
@@ -106,6 +119,7 @@ export class BashToolUI extends Container implements ToolUIComponent {
       : ''
 
     let content = header
+    if (!this.executionStarted) content += ` ${theme.dim(formatCompletedStatus(this.elapsedMs))}`
     if (toggleHint) content += toggleHint
     content += `\n${outputText}`
     if (exitLine) content += `\n${exitLine}`

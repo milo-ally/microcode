@@ -4,6 +4,7 @@ import { h, Fragment } from '../../tui/jsxFactory.ts'
 import { Box, Container, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
+import { formatCompletedStatus, formatRunningStatus, getProgressFrame } from '../../tui/toolPresentation.ts'
 
 interface ToolResult {
   content: Array<{ type: string; text?: string }>
@@ -28,6 +29,7 @@ export class GrepToolUI extends Container {
   private args: any
   private expanded = false
   private executionStarted = false
+  private elapsedMs = 0
   private result?: ToolResult
   private details?: GrepDetails
   private contentBox: Box
@@ -50,6 +52,11 @@ export class GrepToolUI extends Container {
     this.rebuild()
   }
 
+  updateElapsed(elapsedMs: number): void {
+    this.elapsedMs = elapsedMs
+    this.rebuild()
+  }
+
   updateResult(result: ToolResult, isPartial = false): void {
     this.result = result
     if (!isPartial) {
@@ -64,19 +71,19 @@ export class GrepToolUI extends Container {
   }
 
   private rebuild(): void {
-    const bgFn = this.result
+    const bgFn = this.result && !this.executionStarted
       ? this.result.isError
         ? (text: string) => theme.bg('toolErrorBg', text)
         : (text: string) => theme.bg('toolSuccessBg', text)
       : (text: string) => theme.bg('toolPendingBg', text)
     this.contentBox.setBgFn(bgFn)
 
-    const icon = this.result
+    const icon = this.result && !this.executionStarted
       ? this.result.isError
         ? theme.fg('error', '✗')
         : theme.fg('success', '✓')
       : this.executionStarted
-        ? theme.fg('warning', '⚙')
+        ? theme.fg('warning', getProgressFrame(this.elapsedMs))
         : theme.dim('○')
 
     const pattern = this.args?.pattern || '...'
@@ -89,7 +96,7 @@ export class GrepToolUI extends Container {
     if (!this.result) {
       this.contentBox.addChild(
         new Text(
-          `${icon} ${chalk.bold('Grep')} ${theme.fg('accent', '/' + shortPattern + '/')} ${modeTag} ${theme.dim('running…')}`,
+          `${icon} ${chalk.bold('Grep')} ${theme.fg('accent', '/' + shortPattern + '/')} ${modeTag} ${theme.dim(formatRunningStatus(this.elapsedMs))}`,
         ),
       )
       return
@@ -116,6 +123,8 @@ export class GrepToolUI extends Container {
     if (numFiles !== undefined && numFiles > 0) parts.push(`${numFiles} file${numFiles !== 1 ? 's' : ''}`)
     if (numMatches !== undefined && numMatches > 0) parts.push(`${numMatches} match${numMatches !== 1 ? 'es' : ''}`)
     if (truncated) parts.push(theme.dim('truncated'))
+    if (parts.length === 0) parts.push('no matches')
+    parts.push(formatCompletedStatus(this.elapsedMs))
 
     this.contentBox.addChild(
       new Text(

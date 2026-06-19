@@ -39,6 +39,7 @@ import {
   type CachedImage,
 } from '../utils/imageUtils.ts'
 import { existsSync } from 'fs'
+import { isAbsolute, resolve } from 'path'
 import type { McpClientManager } from '../mcp/client.ts'
 import type { McpServerState, McpServerConfig } from '../mcp/types.ts'
 import { TOOL_NAME as BASH_TOOL_NAME } from '../tools/BashTool/BashTool.ts'
@@ -57,6 +58,15 @@ declare const MACRO: {
 }
 
 const APP_NAME = 'Microcode'
+
+function countStreamingLines(content: string): number {
+  if (!content) return 0
+  let lines = 1
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) === 10) lines++
+  }
+  return content.endsWith('\n') ? lines - 1 : lines
+}
 
 const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   { name: 'clear', description: 'Clear the conversation history' },
@@ -85,6 +95,8 @@ export class App {
   private streamingComponent?: AssistantMessageComponent
   private streamingMessage?: AssistantMessage
   private pendingTools = new Map<string, ToolUIComponent>()
+  private pendingToolStartedAt = new Map<string, number>()
+  private streamingToolLastRenderAt = new Map<string, number>()
   private toolExecutionInProgress = false // Track if any tool is currently executing
   private loadingAnimation?: Loader
   private lastSigintTime = 0
@@ -1948,6 +1960,15 @@ export class App {
           if (this.streamingComponent && event.message.role === 'assistant') {
             this.streamingMessage = event.message
             this.streamingComponent.updateContent(this.streamingMessage)
+            if (
+              event.assistantMessageEvent.type === 'toolcall_start' ||
+              event.assistantMessageEvent.type === 'toolcall_delta'
+            ) {
+              this.updateStreamingToolCall(
+                event.message,
+                event.assistantMessageEvent.type === 'toolcall_start',
+              )
+            }
             this.ui.requestRender()
           }
           break
@@ -1966,29 +1987,39 @@ export class App {
           break
 
         case 'tool_execution_start': {
+          const existing = this.pendingTools.get(event.toolCallId)
           const UIConstructor = getToolUIConstructor(event.toolName)
-          const component: ToolUIComponent = UIConstructor
-            ? new UIConstructor(event.toolCallId, event.args)
-            : new ToolExecutionComponent(event.toolName, event.toolCallId, event.args)
+          const component: ToolUIComponent = existing ?? (
+            UIConstructor
+              ? new UIConstructor(event.toolCallId, event.args)
+              : new ToolExecutionComponent(event.toolName, event.toolCallId, event.args)
+          )
+          component.updateArgs?.(event.args)
           component.setExpanded(false)
           component.markExecutionStarted()
-          this.chatContainer.addChild(component)
+          if (!existing) {
+            this.chatContainer.addChild(component)
+          }
           this.pendingTools.set(event.toolCallId, component)
+          this.pendingToolStartedAt.set(event.toolCallId, performance.now())
           this.toolExecutionInProgress = true
           // Ensure spinner is visible during tool execution
           this.showWorking()
-          this.ui.requestRender()
+          this.commitToolFrame()
           break
         }
 
         case 'tool_execution_update': {
           const component = this.pendingTools.get(event.toolCallId)
           if (component) {
+            if (component.updateDetails && event.partialResult.details) {
+              component.updateDetails(event.partialResult.details)
+            }
             component.updateResult(
               { ...event.partialResult, isError: false },
               true,
             )
-            this.ui.requestRender()
+            this.commitToolFrame()
           }
           break
         }
@@ -1996,6 +2027,10 @@ export class App {
         case 'tool_execution_end': {
           const component = this.pendingTools.get(event.toolCallId)
           if (component) {
+            const startedAt = this.pendingToolStartedAt.get(event.toolCallId)
+            if (startedAt !== undefined) {
+              component.updateElapsed?.(performance.now() - startedAt)
+            }
             component.updateResult({
               ...event.result,
               isError: event.isError,
@@ -2005,6 +2040,8 @@ export class App {
               component.updateDetails(event.result.details)
             }
             this.pendingTools.delete(event.toolCallId)
+            this.pendingToolStartedAt.delete(event.toolCallId)
+            this.streamingToolLastRenderAt.delete(event.toolCallId)
             if (this.pendingTools.size === 0) {
               this.toolExecutionInProgress = false
             }
@@ -2051,6 +2088,88 @@ export class App {
     })
   }
 
+  private updateStreamingToolCall(message: AgentMessage, forceRender: boolean): void {
+    if (message.role !== 'assistant') return
+
+    const toolCalls = message.content.filter((block) => block.type === 'toolCall')
+    for (const toolCall of toolCalls) {
+      const args = toolCall.arguments ?? {}
+      let component = this.pendingTools.get(toolCall.id)
+
+      if (!component) {
+        const UIConstructor = getToolUIConstructor(toolCall.name)
+        component = UIConstructor
+          ? new UIConstructor(toolCall.id, args)
+          : new ToolExecutionComponent(toolCall.name, toolCall.id, args)
+        component.setExpanded(false)
+        component.markExecutionStarted()
+        this.chatContainer.addChild(component)
+        this.pendingTools.set(toolCall.id, component)
+        this.pendingToolStartedAt.set(toolCall.id, performance.now())
+      } else {
+        component.updateArgs?.(args)
+      }
+
+      if (toolCall.name === WRITE_TOOL_NAME && component.updateDetails) {
+        const filePath = typeof args.file_path === 'string' ? args.file_path : ''
+        const content = typeof args.content === 'string' ? args.content : ''
+        const resolvedPath = filePath
+          ? (isAbsolute(filePath) ? filePath : resolve(process.cwd(), filePath))
+          : ''
+        const isNewFile = resolvedPath ? !existsSync(resolvedPath) : false
+        component.updateDetails({
+          path: resolvedPath || filePath,
+          bytesWritten: Buffer.byteLength(content, 'utf8'),
+          additions: countStreamingLines(content),
+          removals: 0,
+          isNewFile,
+          phase: 'preparing',
+        })
+      } else if (toolCall.name === EDIT_TOOL_NAME && component.updateDetails) {
+        const oldString = typeof args.old_string === 'string' ? args.old_string : ''
+        const newString = typeof args.new_string === 'string' ? args.new_string : ''
+        component.updateDetails({
+          path: typeof args.file_path === 'string' ? args.file_path : '',
+          additions: countStreamingLines(newString),
+          removals: countStreamingLines(oldString),
+          replacements: args.replace_all === true ? 0 : 1,
+          phase: 'preparing',
+        })
+      }
+
+      const now = performance.now()
+      const lastRenderAt = this.streamingToolLastRenderAt.get(toolCall.id) ?? 0
+      if (forceRender || now - lastRenderAt >= 100) {
+        this.streamingToolLastRenderAt.set(toolCall.id, now)
+        this.commitToolFrame()
+      }
+    }
+  }
+
+  private commitToolFrame(): void {
+    const immediateUi = this.ui as unknown as {
+      stopped?: boolean
+      renderRequested?: boolean
+      renderTimer?: ReturnType<typeof setTimeout>
+      lastRenderAt?: number
+      doRender?: () => void
+    }
+
+    if (!immediateUi.stopped && typeof immediateUi.doRender === 'function') {
+      if (immediateUi.renderTimer) {
+        clearTimeout(immediateUi.renderTimer)
+        immediateUi.renderTimer = undefined
+      }
+      immediateUi.renderRequested = false
+      immediateUi.lastRenderAt = performance.now()
+      immediateUi.doRender()
+      return
+    }
+
+    // Fallback for future pi-tui versions that change their renderer internals.
+    this.ui.requestRender()
+  }
+
   private updateContextUsage(): void {
     const compactionManager = getCompactionManager(this.agent)
     if (!compactionManager) return
@@ -2067,6 +2186,7 @@ export class App {
         (text: string) => chalk.hex('#00d7ff')(text),
         (text: string) => chalk.hex('#666666')(text),
         'Working...',
+        { frames: [] },
       )
       this.loadingAnimation.start()
       this.statusContainer.clear()

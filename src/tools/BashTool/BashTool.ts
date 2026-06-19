@@ -61,6 +61,20 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashTo
       const { shell, args } = getShellConfig()
       let stdout = ''
       let stderr = ''
+      let updateTimer: ReturnType<typeof setTimeout> | undefined
+
+      const emitUpdate = () => {
+        updateTimer = undefined
+        onUpdate?.({
+          content: [{ type: 'text', text: stdout + stderr }],
+          details: { stdout, stderr, exitCode: null },
+        })
+      }
+
+      const scheduleUpdate = () => {
+        if (!onUpdate || updateTimer) return
+        updateTimer = setTimeout(emitUpdate, 200)
+      }
 
       const exitCode = await new Promise<number | null>((resolve, reject) => {
         const child = spawn(shell, [...args, command], {
@@ -87,23 +101,13 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashTo
         child.stdout?.on('data', (data: Buffer) => {
           const text = data.toString()
           stdout += text
-          if (onUpdate) {
-            onUpdate({
-              content: [{ type: 'text', text: stdout + stderr }],
-              details: { stdout, stderr, exitCode: null },
-            })
-          }
+          scheduleUpdate()
         })
 
         child.stderr?.on('data', (data: Buffer) => {
           const text = data.toString()
           stderr += text
-          if (onUpdate) {
-            onUpdate({
-              content: [{ type: 'text', text: stdout + stderr }],
-              details: { stdout, stderr, exitCode: null },
-            })
-          }
+          scheduleUpdate()
         })
 
         const onAbort = () => {
@@ -120,6 +124,10 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashTo
 
         child.on('close', (code) => {
           if (timeoutHandle) clearTimeout(timeoutHandle)
+          if (updateTimer) {
+            clearTimeout(updateTimer)
+            emitUpdate()
+          }
           if (timedOut) {
             resolve(null)
           } else {
@@ -129,6 +137,7 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashTo
 
         child.on('error', (err) => {
           if (timeoutHandle) clearTimeout(timeoutHandle)
+          if (updateTimer) clearTimeout(updateTimer)
           reject(err)
         })
       })

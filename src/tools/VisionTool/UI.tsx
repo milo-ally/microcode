@@ -4,6 +4,7 @@ import { h, Fragment } from '../../tui/jsxFactory.ts'
 import { Box, Container, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
+import { formatCompletedStatus, formatRunningStatus, getProgressFrame } from '../../tui/toolPresentation.ts'
 
 interface ToolResult {
   content: Array<{ type: string; text?: string }>
@@ -20,6 +21,7 @@ export class VisionToolUI extends Container {
   private args: any
   private expanded = false
   private executionStarted = false
+  private elapsedMs = 0
   private result?: ToolResult
   private details?: VisionDetails
   private contentBox: Box
@@ -42,6 +44,11 @@ export class VisionToolUI extends Container {
     this.rebuild()
   }
 
+  updateElapsed(elapsedMs: number): void {
+    this.elapsedMs = elapsedMs
+    this.rebuild()
+  }
+
   updateResult(result: ToolResult, isPartial = false): void {
     this.result = result
     if (!isPartial) {
@@ -56,19 +63,19 @@ export class VisionToolUI extends Container {
   }
 
   private rebuild(): void {
-    const bgFn = this.result
+    const bgFn = this.result && !this.executionStarted
       ? this.result.isError
         ? (text: string) => theme.bg('toolErrorBg', text)
         : (text: string) => theme.bg('toolSuccessBg', text)
       : (text: string) => theme.bg('toolPendingBg', text)
     this.contentBox.setBgFn(bgFn)
 
-    const icon = this.result
+    const icon = this.result && !this.executionStarted
       ? this.result.isError
         ? theme.fg('error', '✗')
         : theme.fg('success', '✓')
       : this.executionStarted
-        ? theme.fg('warning', '⚙')
+        ? theme.fg('warning', getProgressFrame(this.elapsedMs))
         : theme.dim('○')
 
     const source = this.details?.source ?? this.args?.image_source ?? ''
@@ -78,7 +85,7 @@ export class VisionToolUI extends Container {
     this.contentBox.clear()
 
     if (!this.result) {
-      this.contentBox.addChild(new Text(`${header} ${theme.dim('processing…')}`))
+      this.contentBox.addChild(new Text(`${header} ${theme.dim(formatRunningStatus(this.elapsedMs, 'processing'))}`))
       return
     }
 
@@ -90,7 +97,7 @@ export class VisionToolUI extends Container {
       this.contentBox.addChild(new Text(`${header}\n  ${chalk.hex('#cc6666')(errText.slice(0, 200))}`))
     } else {
       const info = `${sourceType} · ${this.details?.mimeType ?? 'image'}`
-      this.contentBox.addChild(new Text(`${header}  ${theme.fg('muted', info)}`))
+      this.contentBox.addChild(new Text(`${header}  ${theme.fg('muted', info)} ${theme.dim(`· ${formatCompletedStatus(this.elapsedMs)}`)}`))
     }
   }
 }

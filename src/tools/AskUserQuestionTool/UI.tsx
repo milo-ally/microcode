@@ -70,9 +70,7 @@ export class AskUserQuestionToolUI extends Container implements ToolUIComponent 
         ? this.result.isError
           ? theme.fg('error', '✗')
           : theme.fg('success', '✓')
-        : this.executionStarted
-          ? theme.fg('warning', '⚙')
-          : theme.dim('○')
+        : theme.dim('○')
 
     this.contentBox.clear()
 
