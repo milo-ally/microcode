@@ -9,9 +9,20 @@ import {
 } from '@earendil-works/pi-agent-core'
 import { NodeFileSystem } from './NodeFileSystem.ts'
 import { replaceImageBlocksForPersistence } from './imageSerializer.ts'
+import type {
+  AgentCompactionRecord,
+  AgentSessionPersistence,
+} from '../agent/persistence.ts'
+import {
+  TaskSystem,
+  type TaskList,
+  type TaskMarkUpdate,
+  type TaskReminderUpdate,
+} from '../tasks/TaskSystem.ts'
 
 const SESSIONS_DIR = path.join(os.homedir(), '.microcode', 'sessions')
 const TITLES_FILE = path.join(SESSIONS_DIR, '.titles.json')
+const TASKS_DIR = path.join(SESSIONS_DIR, '.tasks')
 
 export interface SessionListItem extends JsonlSessionMetadata {
   title?: string
@@ -21,19 +32,21 @@ export interface SessionListItem extends JsonlSessionMetadata {
  * Manages session lifecycle: create, persist, resume, list.
  * Wraps pi-agent-core's JsonlSessionRepo and Session.
  */
-export class SessionManager {
+export class SessionManager implements AgentSessionPersistence {
   private repo: JsonlSessionRepo
   private session: Session | null = null
   private metadata: JsonlSessionMetadata | null = null
   private savedMessageCount = 0
   private titleCache: Map<string, string> | null = null
+  private readonly taskSystem: TaskSystem
 
-  constructor() {
+  constructor(options: { tasksRoot?: string } = {}) {
     const fs = new NodeFileSystem('/')
     this.repo = new JsonlSessionRepo({
       fs,
       sessionsRoot: SESSIONS_DIR,
     })
+    this.taskSystem = new TaskSystem(options.tasksRoot ?? TASKS_DIR)
   }
 
   /**
@@ -76,7 +89,7 @@ export class SessionManager {
    * Persist new messages to the session.
    * Only appends messages that haven't been saved yet.
    */
-  async saveMessages(messages: AgentMessage[]): Promise<void> {
+  async saveMessages(messages: readonly AgentMessage[]): Promise<void> {
     if (!this.session) return
 
     // Append only new messages, with image blocks replaced by text references
@@ -87,16 +100,33 @@ export class SessionManager {
     this.savedMessageCount = messages.length
   }
 
-  /**
-   * Record a compaction event in the session.
-   */
-  async saveCompaction(
-    summary: string,
-    firstKeptEntryId: string,
-    tokensBefore: number,
-  ): Promise<void> {
+  async recordCompaction(record: AgentCompactionRecord): Promise<void> {
     if (!this.session) return
-    await this.session.appendCompaction(summary, firstKeptEntryId, tokensBefore)
+    const entries = await this.session.getBranch()
+    const messageEntries = entries.filter((entry) => entry.type === 'message')
+    if (messageEntries.length === 0) {
+      throw new Error('No persisted messages available for compaction.')
+    }
+    const keptCount = Math.min(record.keptMessageCount, messageEntries.length)
+    const firstKeptEntry = messageEntries[
+      Math.max(0, messageEntries.length - keptCount)
+    ]
+    // A fully malformed trailing tool interaction may be summarized without
+    // retaining any original messages. The session builder treats an unknown
+    // boundary ID as "summary only", which is the desired representation.
+    const firstKeptEntryId =
+      firstKeptEntry?.id ?? `compacted-summary-only-${Date.now()}`
+    await this.session.appendCompaction(
+      record.summary,
+      firstKeptEntryId,
+      record.tokensBefore,
+      {
+        tokensAfter: record.tokensAfter,
+        automatic: record.automatic,
+      },
+      record.automatic,
+    )
+    this.savedMessageCount = record.compactedMessageCount
   }
 
   /**
@@ -106,13 +136,6 @@ export class SessionManager {
     if (!this.session) return []
     const context = await this.session.buildContext()
     return context.messages
-  }
-
-  /**
-   * Get the current session instance.
-   */
-  getSession(): Session | null {
-    return this.session
   }
 
   /**
@@ -129,26 +152,66 @@ export class SessionManager {
     return this.metadata?.id ?? null
   }
 
+  async createTaskList(title: string, tasks: readonly string[]): Promise<TaskList> {
+    return this.taskSystem.createList(this.requireSessionId(), title, tasks)
+  }
+
+  async listTaskLists(): Promise<TaskList[]> {
+    return this.taskSystem.listTaskLists(this.requireSessionId())
+  }
+
+  async getTaskReminder(): Promise<string | undefined> {
+    return this.taskSystem.getReminder(this.requireSessionId())
+  }
+
+  async claimTaskList(listId: string): Promise<TaskList> {
+    return this.taskSystem.claimTaskList(this.requireSessionId(), listId)
+  }
+
+  async remindTask(listId: string, taskId: string, reminder = true): Promise<TaskList> {
+    return this.taskSystem.remindTask(this.requireSessionId(), listId, taskId, reminder)
+  }
+
+  async remindTasks(
+    listId: string,
+    tasks: readonly TaskReminderUpdate[],
+  ): Promise<TaskList> {
+    return this.taskSystem.remindTasks(this.requireSessionId(), listId, tasks)
+  }
+
+  async markTask(
+    listId: string | undefined,
+    taskId: string,
+    completed: boolean,
+    pending?: boolean,
+  ): Promise<TaskList> {
+    return this.taskSystem.markTask(
+      this.requireSessionId(),
+      listId,
+      taskId,
+      completed,
+      pending,
+    )
+  }
+
+  async markTasks(input: {
+    list_id?: string
+    tasks: readonly TaskMarkUpdate[]
+  }): Promise<TaskList> {
+    return this.taskSystem.markTasks(this.requireSessionId(), input)
+  }
+
+  private requireSessionId(): string {
+    const sessionId = this.getSessionId()
+    if (!sessionId) throw new Error('No active session.')
+    return sessionId
+  }
+
   /**
    * Delete a session.
    */
   async delete(meta: JsonlSessionMetadata): Promise<void> {
     await this.repo.delete(meta)
-  }
-
-  /**
-   * Reset saved message count (e.g., after compaction replaces all messages).
-   */
-  resetSavedCount(): void {
-    this.savedMessageCount = 0
-  }
-
-  /**
-   * Set saved message count to a specific value.
-   * Use after compaction to avoid re-saving messages that are already in the session.
-   */
-  setSavedMessageCount(count: number): void {
-    this.savedMessageCount = count
   }
 
   /**
@@ -214,15 +277,9 @@ export class SessionManager {
 
   /**
    * Switch to a different session, returning its messages.
-   * Saves the current session first.
+   * The caller is responsible for persisting the current runtime first.
    */
-  async switchToSession(meta: JsonlSessionMetadata, currentMessages: AgentMessage[]): Promise<AgentMessage[]> {
-    // Save current session
-    if (this.session) {
-      await this.saveMessages(currentMessages)
-    }
-
-    // Load target session
+  async switchToSession(meta: JsonlSessionMetadata): Promise<AgentMessage[]> {
     this.session = await this.repo.open(meta)
     this.metadata = meta
     const context = await this.session.buildContext()

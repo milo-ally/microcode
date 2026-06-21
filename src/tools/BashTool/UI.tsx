@@ -11,6 +11,7 @@ import type { ToolUIComponent, ToolResult } from '../registry.ts'
 interface BashDetails {
   stdout: string
   stderr: string
+  output?: string
   exitCode: number | null
 }
 
@@ -110,16 +111,38 @@ export class BashToolUI extends Container implements ToolUIComponent {
     }
 
     const needsCollapse = lines.length > COLLAPSED_OUTPUT_LINES && !this.expanded
-    const displayLines = needsCollapse ? lines.slice(0, COLLAPSED_OUTPUT_LINES) : lines
+    let displayLines = lines
+    if (needsCollapse && this.executionStarted) {
+      // Live output should follow the command, not remain stuck on its first lines.
+      displayLines = lines.slice(-COLLAPSED_OUTPUT_LINES)
+    } else if (needsCollapse) {
+      const headCount = Math.ceil(COLLAPSED_OUTPUT_LINES / 2)
+      const tailCount = COLLAPSED_OUTPUT_LINES - headCount
+      displayLines = [
+        ...lines.slice(0, headCount),
+        theme.dim(`... ${lines.length - COLLAPSED_OUTPUT_LINES} lines omitted ...`),
+        ...lines.slice(-tailCount),
+      ]
+    }
     const outputText = displayLines.join('\n')
 
     const exitLine = this.renderExitCode()
     const toggleHint = lines.length > COLLAPSED_OUTPUT_LINES
-      ? theme.dim(this.expanded ? ' [collapse]' : ` [expand, ${lines.length} lines]`)
+      ? theme.dim(
+          this.expanded
+            ? ' [collapse]'
+            : this.executionStarted
+              ? ` [latest ${COLLAPSED_OUTPUT_LINES}/${lines.length} lines]`
+              : ` [expand, ${lines.length} lines]`,
+        )
       : ''
 
     let content = header
-    if (!this.executionStarted) content += ` ${theme.dim(formatCompletedStatus(this.elapsedMs))}`
+    content += ` ${theme.dim(
+      this.executionStarted
+        ? formatRunningStatus(this.elapsedMs)
+        : formatCompletedStatus(this.elapsedMs),
+    )}`
     if (toggleHint) content += toggleHint
     content += `\n${outputText}`
     if (exitLine) content += `\n${exitLine}`
@@ -139,8 +162,8 @@ export class BashToolUI extends Container implements ToolUIComponent {
 
   private getOutput(): string {
     if (this.details) {
-      const { stdout, stderr } = this.details
-      return (stdout + stderr).trimEnd()
+      const { stdout, stderr, output } = this.details
+      return (output ?? stdout + stderr).trimEnd()
     }
     if (!this.result?.content) return ''
     return this.result.content

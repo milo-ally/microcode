@@ -29,3 +29,8 @@ Thumbs.db
 
 # Bun
 bun.lockb
+
+# coding agent
+.claude
+.agents
+.codex

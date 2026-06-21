@@ -1,14 +1,13 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
-import { createMicrocodeAgent } from './agent.ts'
-import { resolveApiKey, getAllModels, getCustomModelDefs } from './models/index.ts'
+import { createMicrocodeAgentRuntime } from './agent/index.ts'
+import { getAllModels, getCustomModelDefs } from './models/index.ts'
 import { App } from './tui/app.ts'
 import { McpClientManager } from './mcp/client.ts'
 import { loadMcpConfig, isMcpConfigEmpty } from './mcp/config.ts'
 import { addMcpServer, removeMcpServer, listMcpServers, parseEnvVars, parseHeaders, type ConfigScope } from './mcp/configWrite.ts'
 import type { McpServerConfig } from './mcp/types.ts'
-import { createMcpTools, createListMcpResourcesTool, createReadMcpResourceTool, registerMcpToolsAsDeferred } from './tools/index.ts'
 import { SessionManager } from './session/SessionManager.ts'
-import { PermissionManager, type PermissionMode, PERMISSION_MODES } from './permissions/index.ts'
+import { type PermissionMode, PERMISSION_MODES } from './permissions/index.ts'
 import { cleanupImageCache } from './utils/imageUtils.ts'
 
 declare const MACRO: {
@@ -223,7 +222,7 @@ Options:
   --version, -v              Show version
   --help, -h                 Show this help
   --resume [id]              Resume a session (last session if no id given)
-  --permission <mode>        Set permission mode: default, auto-approve, plan
+  --permission <mode>        Set permission mode: interactive, auto-approve, plan
   --permission-mode <mode>   (alias for --permission)
   --model <model-id>         Override the model (e.g., claude-sonnet-4-20250514)
   --thinking <level>         Set thinking depth: off, minimal, low, medium, high, xhigh
@@ -398,24 +397,26 @@ Session Management:
     await sessionManager.create(cwd)
   }
 
-  // Create permission manager
-  const permissionManager = new PermissionManager({ mode: permissionMode })
-
   // Create MCP client and agent without waiting for MCP servers
   const mcpClient = new McpClientManager()
-  const agent = createMicrocodeAgent({ cwd, modelId, thinkingLevel, permissionManager })
-
+  const agent = createMicrocodeAgentRuntime({
+    cwd,
+    modelId,
+    thinkingLevel,
+    permission: { mode: permissionMode },
+    persistence: sessionManager,
+  })
   // Restore messages if resuming
   if (restoredMessages && restoredMessages.length > 0) {
-    agent.state.messages = restoredMessages
+    agent.replaceMessages(restoredMessages, 'rebuild')
   }
 
   // Create TUI app (REPL starts immediately)
-  const app = new App(agent, mcpClient, sessionManager, permissionManager, modelId, thinkingLevel)
+  const app = new App(agent, mcpClient, sessionManager)
 
   // Warn if no API key is configured (non-blocking — app still starts)
-  if (!resolveApiKey(agent.state.model)) {
-    const model = agent.state.model
+  if (!agent.getApiKey()) {
+    const model = agent.getCurrentModel()
     const apiKeyEnv = (model as any).apiKeyEnv as string | undefined
     const keyHint = apiKeyEnv
       ? `$${apiKeyEnv}`
@@ -426,19 +427,19 @@ Session Management:
   }
 
   // Wire permission prompt to TUI
-  permissionManager.setOnPermissionRequest(
+  agent.setPermissionRequestHandler(
     (toolName, input, description) => app.promptPermission(toolName, input, description),
   )
 
   // Wire ask_user_question interactive handler to TUI
-  permissionManager.setOnAskUserQuestion(
+  agent.setAskUserQuestionHandler(
     (toolName, input) => app.promptAskUserQuestion(toolName, input),
   )
 
   // Handle exit from TUI (Ctrl+C, Ctrl+D, Escape)
   app.onExit = async () => {
     try {
-      await sessionManager.saveMessages(agent.state.messages as AgentMessage[])
+      await agent.persistMessages()
     } catch {
       // Ignore save errors on shutdown
     }
@@ -455,15 +456,7 @@ Session Management:
   const mcpConfigs = await loadMcpConfig(cwd)
   if (!isMcpConfigEmpty(mcpConfigs)) {
     void mcpClient.connectAll(mcpConfigs).then(() => {
-      // Register MCP tools as deferred (discovered via ToolSearchTool)
-      registerMcpToolsAsDeferred(mcpClient)
-
-      // Inject resource tools directly (they're always needed)
-      const resourceTools = [
-        createListMcpResourcesTool(mcpClient),
-        createReadMcpResourceTool(mcpClient),
-      ]
-      agent.state.tools = [...agent.state.tools, ...resourceTools]
+      agent.configureMcpTools(mcpClient)
 
       // Rebuild system prompt with MCP info and deferred tool names
       app.updateMcpState(mcpClient)
@@ -477,7 +470,7 @@ Session Management:
   const shutdown = async () => {
     // Save session before exit
     try {
-      await sessionManager.saveMessages(agent.state.messages as AgentMessage[])
+      await agent.persistMessages()
     } catch {
       // Ignore save errors on shutdown
     }

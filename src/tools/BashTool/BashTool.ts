@@ -1,6 +1,7 @@
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core'
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
+import { stripVTControlCharacters } from 'util'
 import { Type, type Static } from 'typebox'
 import type { PermissionBehavior } from '../../permissions/types.ts'
 
@@ -27,7 +28,26 @@ export type BashToolInput = Static<typeof bashSchema>
 export interface BashToolDetails {
   stdout: string
   stderr: string
+  output: string
   exitCode: number | null
+}
+
+function normalizeTerminalOutput(value: string): string {
+  const withoutAnsi = stripVTControlCharacters(value)
+    .replace(/\r\n/g, '\n')
+    .replace(/\0/g, '')
+
+  return withoutAnsi
+    .split('\n')
+    .map((line) => {
+      // A bare carriage return means "overwrite this terminal line".
+      let current = line.split('\r').at(-1) ?? ''
+      while (current.includes('\b')) {
+        current = current.replace(/[^\b]\b/g, '')
+      }
+      return current.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trimEnd()
+    })
+    .join('\n')
 }
 
 function getShellConfig(): { shell: string; args: string[]; name: string } {
@@ -61,13 +81,22 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashTo
       const { shell, args } = getShellConfig()
       let stdout = ''
       let stderr = ''
+      let output = ''
       let updateTimer: ReturnType<typeof setTimeout> | undefined
 
       const emitUpdate = () => {
         updateTimer = undefined
+        const cleanStdout = normalizeTerminalOutput(stdout)
+        const cleanStderr = normalizeTerminalOutput(stderr)
+        const cleanOutput = normalizeTerminalOutput(output)
         onUpdate?.({
-          content: [{ type: 'text', text: stdout + stderr }],
-          details: { stdout, stderr, exitCode: null },
+          content: [{ type: 'text', text: cleanOutput }],
+          details: {
+            stdout: cleanStdout,
+            stderr: cleanStderr,
+            output: cleanOutput,
+            exitCode: null,
+          },
         })
       }
 
@@ -101,12 +130,14 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashTo
         child.stdout?.on('data', (data: Buffer) => {
           const text = data.toString()
           stdout += text
+          output += text
           scheduleUpdate()
         })
 
         child.stderr?.on('data', (data: Buffer) => {
           const text = data.toString()
           stderr += text
+          output += text
           scheduleUpdate()
         })
 
@@ -142,7 +173,9 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashTo
         })
       })
 
-      const output = stdout + stderr
+      stdout = normalizeTerminalOutput(stdout)
+      stderr = normalizeTerminalOutput(stderr)
+      output = normalizeTerminalOutput(output)
       const truncated =
         output.length > 100000
           ? output.slice(0, 50000) + '\n\n... [output truncated] ...\n\n' + output.slice(-50000)
@@ -150,7 +183,7 @@ export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashTo
 
       return {
         content: [{ type: 'text', text: truncated || '(no output)' }],
-        details: { stdout, stderr, exitCode },
+        details: { stdout, stderr, output, exitCode },
       }
     },
   }

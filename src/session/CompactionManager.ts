@@ -4,8 +4,8 @@ import {
   DEFAULT_COMPACTION_SETTINGS,
   type CompactionSettings,
   type AgentMessage,
-  type Model,
 } from '@earendil-works/pi-agent-core'
+import type { Model } from '@earendil-works/pi-ai'
 import { estimateMessagesTokens } from './TokenEstimator.ts'
 import { getCompactUserSummaryMessage } from './compactPrompt.ts'
 import { TOOL_NAME as BASH_TOOL_NAME } from '../tools/BashTool/BashTool.ts'
@@ -15,10 +15,30 @@ import { TOOL_NAME as EDIT_TOOL_NAME } from '../tools/FileEditTool/FileEditTool.
 import { TOOL_NAME as VISION_TOOL_NAME } from '../tools/VisionTool/VisionTool.ts'
 
 export interface CompactionProgress {
-  phase: 'microcompact' | 'compacting' | 'done'
+  phase:
+    | 'microcompact'
+    | 'analyzing'
+    | 'summarizing'
+    | 'validating'
+    | 'persisting'
+    | 'committing'
+    | 'done'
   message: string
   tokensBefore?: number
   tokensAfter?: number
+  progress?: number
+  elapsedMs?: number
+  processedUnits?: number
+  totalUnits?: number
+}
+
+export interface ContextCompactionResult {
+  summary: string
+  messages: AgentMessage[]
+  tokensBefore: number
+  tokensAfter: number
+  keptMessageCount: number
+  automatic: boolean
 }
 
 const CLEARED_MESSAGE = '[Old tool result content cleared]'
@@ -34,6 +54,135 @@ const COMPACTABLE_TOOL_NAMES = new Set([
 
 // Keep the last N tool results of each type
 const KEEP_RECENT_TOOLS = 3
+const RECENT_CONTEXT_RATIO = 0.1
+const RECENT_HISTORY_RATIO = 0.2
+
+interface ConversationUnit {
+  messages: AgentMessage[]
+  tokens: number
+  safeToRetain: boolean
+}
+
+function getToolCallIds(message: AgentMessage): string[] {
+  if (message.role !== 'assistant') return []
+  return message.content
+    .filter((block) => block.type === 'toolCall')
+    .map((block) => block.id)
+}
+
+function stringifyMalformedUnit(messages: readonly AgentMessage[]): string {
+  return messages.map((message) => {
+    if (message.role === 'toolResult') {
+      const content = message.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+      return `Tool result ${message.toolName} (${message.toolCallId}): ${content}`
+    }
+    if (message.role === 'assistant') {
+      const calls = message.content
+        .filter((block) => block.type === 'toolCall')
+        .map((block) => `${block.name}(${JSON.stringify(block.arguments)})`)
+      return `Assistant requested tools: ${calls.join(', ')}`
+    }
+    return `${message.role}: ${JSON.stringify(message)}`
+  }).join('\n')
+}
+
+export function buildConversationUnits(
+  messages: readonly AgentMessage[],
+): ConversationUnit[] {
+  const units: ConversationUnit[] = []
+  for (let index = 0; index < messages.length;) {
+    const message = messages[index]!
+    const toolCallIds = getToolCallIds(message)
+    if (toolCallIds.length === 0) {
+      units.push({
+        messages: [message],
+        tokens: estimateMessagesTokens([message]),
+        safeToRetain: message.role !== 'toolResult',
+      })
+      index++
+      continue
+    }
+
+    const unitMessages: AgentMessage[] = [message]
+    const resultIds = new Set<string>()
+    let cursor = index + 1
+    while (cursor < messages.length && messages[cursor]!.role === 'toolResult') {
+      const result = messages[cursor]!
+      if (result.role !== 'toolResult') break
+      unitMessages.push(result)
+      resultIds.add(result.toolCallId)
+      cursor++
+    }
+    const expectedIds = new Set(toolCallIds)
+    units.push({
+      messages: unitMessages,
+      tokens: estimateMessagesTokens(unitMessages),
+      safeToRetain:
+        unitMessages.length - 1 === expectedIds.size &&
+        resultIds.size === expectedIds.size &&
+        [...resultIds].every((id) => expectedIds.has(id)),
+    })
+    index = cursor
+  }
+  return units
+}
+
+function normalizeSummaryMessages(units: readonly ConversationUnit[]): AgentMessage[] {
+  return units.flatMap((unit) => {
+    if (unit.safeToRetain) return unit.messages
+    return [{
+      role: 'user' as const,
+      content:
+        '[Malformed tool interaction preserved as text for summarization]\n' +
+        stringifyMalformedUnit(unit.messages),
+      timestamp: unit.messages[0]?.timestamp ?? Date.now(),
+    }]
+  })
+}
+
+function selectCompactionRanges(
+  units: readonly ConversationUnit[],
+  contextWindow: number,
+  tokensBefore: number,
+): { summaryUnits: ConversationUnit[]; recentUnits: ConversationUnit[] } {
+  const recentBudget = Math.max(
+    1,
+    Math.min(
+      Math.floor(contextWindow * RECENT_CONTEXT_RATIO),
+      Math.floor(tokensBefore * RECENT_HISTORY_RATIO),
+    ),
+  )
+  let recentTokens = 0
+  let start = units.length
+  for (let index = units.length - 1; index >= 0; index--) {
+    const unit = units[index]!
+    if (!unit.safeToRetain) break
+    if (start < units.length && recentTokens + unit.tokens > recentBudget) break
+    if (index === 0 && units.length > 1) break
+    start = index
+    recentTokens += unit.tokens
+  }
+  return {
+    summaryUnits: units.slice(0, start),
+    recentUnits: units.slice(start),
+  }
+}
+
+export function validateToolMessagePairs(
+  messages: readonly AgentMessage[],
+): { valid: true } | { valid: false; error: string } {
+  const units = buildConversationUnits(messages)
+  const invalidIndex = units.findIndex((unit) => !unit.safeToRetain)
+  return invalidIndex < 0
+    ? { valid: true }
+    : {
+        valid: false,
+        error: `Invalid tool-call/result pairing in conversation unit ${invalidIndex + 1}.`,
+      }
+}
 
 /**
  * Manages context compression in three layers:
@@ -48,17 +197,38 @@ export class CompactionManager {
   private onProgress?: (progress: CompactionProgress) => void
   private compacting = false
   private systemPromptTokens = 0
+  private generateSummaryFn: typeof generateSummary
+  private progressStartedAt = 0
 
   constructor(options: {
     model: Model<any>
     apiKey: string
     settings?: Partial<CompactionSettings>
     onProgress?: (progress: CompactionProgress) => void
+    generateSummaryFn?: typeof generateSummary
   }) {
     this.model = options.model
     this.apiKey = options.apiKey
     this.settings = { ...DEFAULT_COMPACTION_SETTINGS, ...options.settings }
     this.onProgress = options.onProgress
+    this.generateSummaryFn = options.generateSummaryFn ?? generateSummary
+  }
+
+  reportProgress(progress: CompactionProgress): void {
+    this.onProgress?.({
+      ...progress,
+      elapsedMs:
+        progress.elapsedMs ?? Math.max(0, Date.now() - this.progressStartedAt),
+    })
+  }
+
+  private emitProgress(
+    progress: Omit<CompactionProgress, 'elapsedMs'>,
+  ): void {
+    this.onProgress?.({
+      ...progress,
+      elapsedMs: Math.max(0, Date.now() - this.progressStartedAt),
+    })
   }
 
   /**
@@ -70,28 +240,13 @@ export class CompactionManager {
 
   /**
    * Check if compaction is needed based on current token usage.
-   * Returns false if context was already compacted (first message is a summary).
+   * Previously compacted contexts may grow again and are eligible for another
+   * compaction once they cross the threshold.
    */
   isCompactionNeeded(messages: AgentMessage[]): boolean {
-    if (this.isAlreadyCompacted(messages)) return false
     const messageTokens = estimateMessagesTokens(messages)
     const tokens = messageTokens + this.systemPromptTokens
     return shouldCompact(tokens, this.model.contextWindow, this.settings)
-  }
-
-  /**
-   * Detect if the context was already compacted (starts with a summary message).
-   */
-  private isAlreadyCompacted(messages: AgentMessage[]): boolean {
-    if (messages.length === 0) return false
-    const first = messages[0]
-    if (first.role !== 'user') return false
-    const text = typeof first.content === 'string'
-      ? first.content
-      : Array.isArray(first.content)
-        ? first.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
-        : ''
-    return text.includes('The conversation history before this point was compacted into the following summary')
   }
 
   /**
@@ -100,6 +255,8 @@ export class CompactionManager {
    */
   getContextUsage(messages: AgentMessage[]): {
     tokens: number
+    messageTokens: number
+    systemPromptTokens: number
     contextWindow: number
     percentUsed: number
     percentRemaining: number
@@ -110,6 +267,8 @@ export class CompactionManager {
     const percentUsed = Math.round((tokens / contextWindow) * 100)
     return {
       tokens,
+      messageTokens,
+      systemPromptTokens: this.systemPromptTokens,
       contextWindow,
       percentUsed,
       percentRemaining: Math.max(0, 100 - percentUsed),
@@ -166,61 +325,87 @@ export class CompactionManager {
     return { messages: newMessages, cleared: clearIndices.size }
   }
 
-  /**
-   * Layer 2: Auto-compact — generate LLM summary when context is full.
-   * Returns the new message array with old messages replaced by summary.
-   */
-  async autoCompact(messages: AgentMessage[]): Promise<AgentMessage[]> {
-    if (this.compacting) return messages
-    if (!this.isCompactionNeeded(messages)) return messages
-
-    return this.runCompaction(messages, undefined, true)
-  }
-
-  /**
-   * Layer 3: Manual /compact — user-triggered compaction.
-   */
-  async manualCompact(
+  /** Shared implementation for automatic and manual compaction. */
+  async compact(
     messages: AgentMessage[],
-    customInstructions?: string,
-  ): Promise<AgentMessage[]> {
+    customInstructions: string | undefined,
+    automatic: boolean,
+  ): Promise<ContextCompactionResult> {
     if (this.compacting) {
       throw new Error('Compaction already in progress')
     }
-
-    return this.runCompaction(messages, customInstructions, false)
-  }
-
-  /**
-   * Core compaction logic shared by auto and manual paths.
-   * Uses generateSummary() directly since we work with flat message arrays,
-   * not session entries. The compact() function requires a CompactionPreparation
-   * from session entries.
-   */
-  private async runCompaction(
-    messages: AgentMessage[],
-    customInstructions: string | undefined,
-    isAuto: boolean,
-  ): Promise<AgentMessage[]> {
     this.compacting = true
+    this.progressStartedAt = Date.now()
     const tokensBefore = estimateMessagesTokens(messages)
 
     try {
-      this.onProgress?.({
-        phase: 'compacting',
-        message: isAuto ? 'Auto-compacting context...' : 'Compacting conversation...',
+      this.emitProgress({
+        phase: 'analyzing',
+        message: 'Analyzing conversation structure...',
         tokensBefore,
+        progress: 5,
       })
 
-      const result = await generateSummary(
-        messages,
-        this.model,
-        this.settings.reserveTokens,
-        this.apiKey,
-        undefined, // headers
-        undefined, // signal
-        customInstructions,
+      const units = buildConversationUnits(messages)
+      const { summaryUnits, recentUnits } = selectCompactionRanges(
+        units,
+        this.model.contextWindow,
+        tokensBefore,
       )
+      const messagesToSummarize = normalizeSummaryMessages(
+        summaryUnits.length > 0 ? summaryUnits : units,
+      )
+      const recentMessages = recentUnits.flatMap((unit) => unit.messages)
+
+      this.emitProgress({
+        phase: 'analyzing',
+        message:
+          `Summarizing ${summaryUnits.length} units; ` +
+          `keeping ${recentUnits.length} recent units verbatim.`,
+        tokensBefore,
+        progress: 15,
+        processedUnits: units.length,
+        totalUnits: units.length,
+      })
+
+      let summaryProgress = 20
+      const summaryMessage = automatic
+        ? 'Auto-compacting earlier history...'
+        : 'Summarizing earlier history...'
+      this.emitProgress({
+        phase: 'summarizing',
+        message: summaryMessage,
+        tokensBefore,
+        progress: summaryProgress,
+        processedUnits: summaryUnits.length,
+        totalUnits: units.length,
+      })
+      const progressTimer = setInterval(() => {
+        summaryProgress = Math.min(84, summaryProgress + 1)
+        this.emitProgress({
+          phase: 'summarizing',
+          message: summaryMessage,
+          tokensBefore,
+          progress: summaryProgress,
+          processedUnits: summaryUnits.length,
+          totalUnits: units.length,
+        })
+      }, 250)
+
+      let result
+      try {
+        result = await this.generateSummaryFn(
+          messagesToSummarize,
+          this.model,
+          this.settings.reserveTokens,
+          this.apiKey,
+          undefined,
+          undefined,
+          customInstructions,
+        )
+      } finally {
+        clearInterval(progressTimer)
+      }
 
       if (!result.ok) {
         throw new Error(`Summarization failed: ${result.error.message}`)
@@ -238,26 +423,44 @@ export class CompactionManager {
         timestamp: Date.now(),
       }
 
-      // Keep the last few messages after the summary.
-      // Use a small minimum to avoid keeping everything in short conversations.
-      const keepCount = Math.min(messages.length, Math.max(2, Math.floor(messages.length * 0.2)))
-      const recentMessages = messages.slice(-keepCount)
-
       const newMessages = [summaryUserMessage, ...recentMessages]
+      this.emitProgress({
+        phase: 'validating',
+        message: 'Validating compacted tool-call boundaries...',
+        tokensBefore,
+        progress: 88,
+        processedUnits: units.length,
+        totalUnits: units.length,
+      })
+      const validation = validateToolMessagePairs(newMessages)
+      if (!validation.valid) {
+        throw new Error(`Compaction produced invalid context: ${validation.error}`)
+      }
       const tokensAfter = estimateMessagesTokens(newMessages)
 
-      this.onProgress?.({
-        phase: 'done',
-        message: `Compacted: ${tokensBefore} → ${tokensAfter} tokens`,
+      this.emitProgress({
+        phase: 'validating',
+        message: 'Compacted context is ready to commit.',
         tokensBefore,
         tokensAfter,
+        progress: 90,
+        processedUnits: units.length,
+        totalUnits: units.length,
       })
 
-      return newMessages
+      return {
+        summary,
+        messages: newMessages,
+        tokensBefore,
+        tokensAfter,
+        keptMessageCount: recentMessages.length,
+        automatic,
+      }
     } catch (error) {
-      this.onProgress?.({
+      this.emitProgress({
         phase: 'done',
         message: `Compaction failed: ${error instanceof Error ? error.message : String(error)}`,
+        progress: 100,
       })
       throw error
     } finally {

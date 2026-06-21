@@ -2,7 +2,7 @@
  * PermissionManager — central permission checking for tool execution.
  *
  * Follows microcode-ts's permission architecture with three modes:
- * - default: rules-based + ask for dangerous tools
+ * - interactive: rules-based + ask for dangerous tools
  * - auto-approve: allow all tool calls (YOLO mode)
  * - plan: only allow read-only tools
  */
@@ -14,9 +14,10 @@ import type {
   PermissionBehavior,
   PermissionDecision,
   PermissionMode,
+  PermissionSnapshot,
   PermissionRule,
-  PermissionRuleSource,
   PermissionRuleValue,
+  NonInteractivePermissionStrategy,
   ToolPermissionContext,
 } from './types.ts'
 import { TOOL_DEFAULT_PERMISSIONS, ASK_USER_QUESTION_TOOL_NAME } from '../tools/index.ts'
@@ -35,7 +36,13 @@ export interface PermissionManagerOptions {
     toolName: string,
     input: Record<string, unknown>,
   ) => Promise<{ answers?: Record<string, string>; block?: boolean }>
-  /** Resolver to look up a tool instance by name from agent.state.tools. */
+  nonInteractiveStrategy?: NonInteractivePermissionStrategy
+  onDelegatePermissionRequest?: (
+    toolName: string,
+    input: Record<string, unknown>,
+    description: string,
+  ) => Promise<boolean>
+  /** Resolver to look up a tool instance from the owning Agent tool manager. */
   getTool?: (name: string) => AgentTool<any, any> | undefined
 }
 
@@ -50,6 +57,12 @@ export class PermissionManager {
     toolName: string,
     input: Record<string, unknown>,
   ) => Promise<{ answers?: Record<string, string>; block?: boolean }>
+  private nonInteractiveStrategy: NonInteractivePermissionStrategy
+  private onDelegatePermissionRequest?: (
+    toolName: string,
+    input: Record<string, unknown>,
+    description: string,
+  ) => Promise<boolean>
   private getTool?: (name: string) => AgentTool<any, any> | undefined
 
   constructor(options: PermissionManagerOptions = {}) {
@@ -71,13 +84,15 @@ export class PermissionManager {
     }
 
     this.context = {
-      mode: options.mode ?? 'default',
+      mode: options.mode ?? 'interactive',
       allowRules,
       denyRules,
       askRules,
     }
     this.onPermissionRequest = options.onPermissionRequest
     this.onAskUserQuestion = options.onAskUserQuestion
+    this.nonInteractiveStrategy = options.nonInteractiveStrategy ?? 'deny'
+    this.onDelegatePermissionRequest = options.onDelegatePermissionRequest
     this.getTool = options.getTool
   }
 
@@ -100,6 +115,16 @@ export class PermissionManager {
     this.onAskUserQuestion = handler
   }
 
+  setOnDelegatePermissionRequest(
+    handler: (
+      toolName: string,
+      input: Record<string, unknown>,
+      description: string,
+    ) => Promise<boolean>,
+  ): void {
+    this.onDelegatePermissionRequest = handler
+  }
+
   setGetTool(
     resolver: (name: string) => AgentTool<any, any> | undefined,
   ): void {
@@ -116,7 +141,7 @@ export class PermissionManager {
 
   addRule(rule: PermissionRule): void {
     const list = this.getRuleList(rule.behavior)
-    list.push(rule)
+    list.push({ ...rule })
   }
 
   removeRule(ruleValue: PermissionRuleValue, behavior: PermissionBehavior): void {
@@ -143,7 +168,25 @@ export class PermissionManager {
   }
 
   getContext(): ToolPermissionContext {
-    return { ...this.context }
+    return {
+      mode: this.context.mode,
+      allowRules: this.context.allowRules.map((rule) => ({ ...rule })),
+      denyRules: this.context.denyRules.map((rule) => ({ ...rule })),
+      askRules: this.context.askRules.map((rule) => ({ ...rule })),
+    }
+  }
+
+  getSnapshot(): Readonly<PermissionSnapshot> {
+    const freezeRules = (rules: PermissionRule[]): readonly Readonly<PermissionRule>[] =>
+      Object.freeze(rules.map((rule) => Object.freeze({ ...rule })))
+
+    return Object.freeze({
+      mode: this.context.mode,
+      nonInteractiveStrategy: this.nonInteractiveStrategy,
+      allowRules: freezeRules(this.context.allowRules),
+      denyRules: freezeRules(this.context.denyRules),
+      askRules: freezeRules(this.context.askRules),
+    })
   }
 
   /**
@@ -172,7 +215,7 @@ export class PermissionManager {
       }
     }
 
-    // Mode: default → check rules, then fall back to defaults
+    // Mode: interactive → check rules, then fall back to tool defaults
     // Priority: deny > ask > allow > default behavior
     const denyMatch = matchRule(toolName, input, this.context.denyRules)
     if (denyMatch) {
@@ -241,7 +284,19 @@ export class PermissionManager {
 
     // Ask behavior — prompt user
     if (!this.onPermissionRequest) {
-      // No prompt handler → block in non-interactive mode
+      if (
+        this.nonInteractiveStrategy === 'delegate-to-parent' &&
+        this.onDelegatePermissionRequest
+      ) {
+        const description = this.formatToolDescription(toolName, input)
+        const approved = await this.onDelegatePermissionRequest(toolName, input, description)
+        if (approved) return undefined
+        return {
+          block: true,
+          reason: `Permission denied by parent agent for "${toolName}"`,
+        }
+      }
+
       return { block: true, reason: `Permission required for "${toolName}" (non-interactive mode)` }
     }
 

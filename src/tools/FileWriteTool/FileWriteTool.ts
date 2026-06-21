@@ -1,10 +1,11 @@
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core'
-import { writeFile, mkdir, readFile } from 'fs/promises'
+import { createHash } from 'crypto'
+import { mkdir, readFile, stat, writeFile } from 'fs/promises'
 import { dirname, isAbsolute, resolve } from 'path'
 import { Type, type Static } from 'typebox'
 import type { PermissionBehavior } from '../../permissions/types.ts'
-import { countLineChanges } from '../../utils/diffUtils.ts'
 import { countContentLines } from '../../tui/toolPresentation.ts'
+import { countLineChanges } from '../../utils/diffUtils.ts'
 
 export const TOOL_NAME = 'write'
 export const TOOL_DEFAULT_PERMISSION: PermissionBehavior = 'ask'
@@ -12,6 +13,13 @@ export const TOOL_DEFAULT_PERMISSION: PermissionBehavior = 'ask'
 const writeSchema = Type.Object({
   file_path: Type.String({ description: 'Path to the file to write (relative or absolute)' }),
   content: Type.String({ description: 'Content to write to the file' }),
+  force: Type.Optional(
+    Type.Boolean({
+      description:
+        'Overwrite even if the file changed after this write started. Defaults to false.',
+      default: false,
+    }),
+  ),
 })
 
 export type FileWriteToolInput = Static<typeof writeSchema>
@@ -24,14 +32,84 @@ export interface FileWriteToolDetails {
   isNewFile: boolean
   preview?: string
   phase?: 'writing' | 'complete'
+  warning?: string
+  written?: boolean
 }
 
-export function createFileWriteTool(cwd: string): AgentTool<typeof writeSchema, FileWriteToolDetails> {
+interface FileSnapshot {
+  exists: boolean
+  fingerprint?: string
+  content?: string
+}
+
+const writeQueues = new Map<string, Promise<void>>()
+const writeRevisions = new Map<string, number>()
+
+async function snapshotFile(filePath: string): Promise<FileSnapshot> {
+  try {
+    const [content, info] = await Promise.all([
+      readFile(filePath),
+      stat(filePath),
+    ])
+    return {
+      exists: true,
+      fingerprint: createHash('sha256')
+        .update(content)
+        .update(String(info.mtimeMs))
+        .digest('hex'),
+      content: content.toString('utf8'),
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { exists: false }
+    }
+    throw error
+  }
+}
+
+function withFileWriteLock<T>(
+  filePath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = writeQueues.get(filePath) ?? Promise.resolve()
+  const result = previous.catch(() => undefined).then(operation)
+  const tail = result.then(() => undefined, () => undefined)
+  writeQueues.set(filePath, tail)
+  return result.finally(() => {
+    if (writeQueues.get(filePath) === tail) {
+      writeQueues.delete(filePath)
+      writeRevisions.delete(filePath)
+    }
+  })
+}
+
+function conflictResult(
+  filePath: string,
+  warning: string,
+): AgentToolResult<FileWriteToolDetails> {
+  return {
+    content: [{ type: 'text', text: `Warning: ${warning}` }],
+    details: {
+      path: filePath,
+      bytesWritten: 0,
+      additions: 0,
+      removals: 0,
+      isNewFile: false,
+      warning,
+      written: false,
+      phase: 'complete',
+    },
+  }
+}
+
+export function createFileWriteTool(
+  cwd: string,
+): AgentTool<typeof writeSchema, FileWriteToolDetails> {
   return {
     name: TOOL_NAME,
     label: 'Write',
     description:
-      'Write content to a file. Creates the file if it does not exist, overwrites if it does. Creates parent directories as needed.',
+      'Write content to a file. Creates the file if it does not exist and overwrites an unchanged existing file. Concurrent changes are preserved unless force=true.',
     parameters: writeSchema,
     async execute(
       _toolCallId: string,
@@ -42,22 +120,15 @@ export function createFileWriteTool(cwd: string): AgentTool<typeof writeSchema, 
       const filePath = isAbsolute(params.file_path)
         ? params.file_path
         : resolve(cwd, params.file_path)
+      const invocationRevision = writeRevisions.get(filePath) ?? 0
+      const initial = await snapshotFile(filePath)
 
-      // Read existing content before overwriting (for diff display)
-      let oldContent: string | undefined
-      try {
-        oldContent = await readFile(filePath, 'utf-8')
-      } catch {
-        // File doesn't exist yet — new file
-      }
+      await mkdir(dirname(filePath), { recursive: true })
 
-      const dir = dirname(filePath)
-      await mkdir(dir, { recursive: true })
-
-      const isNewFile = oldContent === undefined
-      const changes = oldContent === undefined
+      const isNewFile = !initial.exists
+      const changes = initial.content === undefined
         ? { additions: countContentLines(params.content), removals: 0 }
-        : countLineChanges(oldContent, params.content)
+        : countLineChanges(initial.content, params.content)
       const bytesWritten = Buffer.byteLength(params.content, 'utf8')
       const preview = isNewFile ? params.content.slice(0, 4000) : undefined
 
@@ -73,24 +144,55 @@ export function createFileWriteTool(cwd: string): AgentTool<typeof writeSchema, 
         },
       })
 
-      await writeFile(filePath, params.content, 'utf-8')
+      return withFileWriteLock(filePath, async () => {
+        const current = await snapshotFile(filePath)
+        const changed = initial.exists
+          ? !current.exists || current.fingerprint !== initial.fingerprint
+          : current.exists
+        const earlierInvocationWrote =
+          (writeRevisions.get(filePath) ?? 0) !== invocationRevision
 
-      return {
-        content: [
-          {
+        if ((changed || earlierInvocationWrote) && params.force !== true) {
+          return conflictResult(
+            filePath,
+            `File changed while this write was pending; no content was written: ${filePath}. Read the current file and retry, or pass force=true to overwrite it.`,
+          )
+        }
+
+        if (!initial.exists && !current.exists && params.force !== true) {
+          try {
+            await writeFile(filePath, params.content, {
+              encoding: 'utf8',
+              flag: 'wx',
+            })
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+            return conflictResult(
+              filePath,
+              `File was created concurrently; no content was written: ${filePath}. Read the current file and retry, or pass force=true to overwrite it.`,
+            )
+          }
+        } else {
+          await writeFile(filePath, params.content, 'utf8')
+        }
+        writeRevisions.set(filePath, invocationRevision + 1)
+
+        return {
+          content: [{
             type: 'text',
-            text: `File written successfully: ${filePath} (${Buffer.byteLength(params.content, 'utf8')} bytes)`,
+            text: `File written successfully: ${filePath} (${bytesWritten} bytes)`,
+          }],
+          details: {
+            path: filePath,
+            bytesWritten,
+            ...changes,
+            isNewFile,
+            preview,
+            written: true,
+            phase: 'complete',
           },
-        ],
-        details: {
-          path: filePath,
-          bytesWritten,
-          ...changes,
-          isNewFile,
-          preview,
-          phase: 'complete',
-        },
-      }
+        }
+      })
     },
   }
 }

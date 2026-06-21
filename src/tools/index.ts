@@ -1,6 +1,6 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import type { PermissionBehavior } from '../permissions/types.ts'
-import { getAllToolDefinitions, getAllDeferredToolDefinitions, getCoreToolDefinitions, getToolDefaultPermissions, registerTool } from './registry.ts'
+import { getAllToolDefinitions, getAllDeferredToolDefinitions, getCoreToolDefinitions, getToolDefaultPermissions, registerTool, type ToolCreationContext } from './registry.ts'
 import { createSkillToolWithAgent, TOOL_DEFAULT_PERMISSION as skillDefault } from './SkillTool/SkillTool.ts'
 import { createToolSearchTool, TOOL_SEARCH_TOOL_NAME, type ToolSearchToolOptions } from './ToolSearchTool/ToolSearchTool.ts'
 
@@ -14,6 +14,7 @@ import './AskUserQuestionTool/index.ts'
 import './GrepTool/index.ts'
 import './GlobTool/index.ts'
 import './VisionTool/index.ts'
+import './TaskTool/index.ts'
 
 // Re-exports for backward compatibility
 export { createBashTool, TOOL_DEFAULT_PERMISSION as BASH_DEFAULT_PERMISSION } from './BashTool/BashTool.ts'
@@ -30,6 +31,7 @@ export { createAskUserQuestionTool, ASK_USER_QUESTION_TOOL_NAME } from './AskUse
 export { createGrepTool, TOOL_NAME as GREP_TOOL_NAME, TOOL_DEFAULT_PERMISSION as GREP_DEFAULT_PERMISSION } from './GrepTool/GrepTool.ts'
 export { createGlobTool, TOOL_NAME as GLOB_TOOL_NAME, TOOL_DEFAULT_PERMISSION as GLOB_DEFAULT_PERMISSION } from './GlobTool/GlobTool.ts'
 export { createVisionTool, TOOL_NAME as VISION_TOOL_NAME, TOOL_DEFAULT_PERMISSION as VISION_DEFAULT_PERMISSION } from './VisionTool/VisionTool.ts'
+export { createTaskTool, TOOL_NAME as TASK_TOOL_NAME, TOOL_DEFAULT_PERMISSION as TASK_DEFAULT_PERMISSION } from './TaskTool/TaskTool.ts'
 
 /** Get the names of all deferred tool definitions (for system prompt listing). */
 export function getDeferredToolNames(): string[] {
@@ -53,10 +55,11 @@ export interface CreateCodingToolsOptions {
   includeDeferred?: boolean
   /** If false, the vision tool is excluded. Default: true. */
   modelSupportsImages?: boolean
+  toolContext?: ToolCreationContext
 }
 
 export function createCodingTools(options: CreateCodingToolsOptions): AgentTool<any, any>[] {
-  const { cwd, getSkills, includeDeferred = false, modelSupportsImages = true } = options
+  const { cwd, getSkills, includeDeferred = false, modelSupportsImages = true, toolContext } = options
 
   const tools: AgentTool<any, any>[] = []
 
@@ -68,7 +71,7 @@ export function createCodingTools(options: CreateCodingToolsOptions): AgentTool<
     if (def.name === TOOL_SEARCH_TOOL_NAME) continue
     // Skip vision tool if model doesn't support images
     if (def.name === 'vision' && !modelSupportsImages) continue
-    tools.push(def.createTool(cwd))
+    tools.push(def.createTool(cwd, toolContext))
   }
 
   // SkillTool needs getSkills at creation time

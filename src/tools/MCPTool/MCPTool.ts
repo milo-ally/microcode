@@ -103,6 +103,7 @@ export function registerMcpToolsAsDeferred(clientManager: McpClientManager): voi
       defaultPermission: 'allow',
       createTool: () => createMcpTool(clientManager, toolInfo),
       description: `[MCP:${toolInfo.serverName}] ${toolInfo.description}`,
+      schema: JSON.stringify(jsonSchemaToTypeBox(toolInfo.inputSchema), null, 2),
       shouldDefer: true,
     })
   }

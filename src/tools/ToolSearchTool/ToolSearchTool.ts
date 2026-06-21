@@ -112,6 +112,10 @@ function formatToolSchema(def: ToolDefinition): string {
   if (def.description) {
     lines.push(def.description)
   }
+  if (def.schema) {
+    lines.push(`Parameters: ${def.schema}`)
+    return lines.join('\n')
+  }
   // Try to extract parameter schema from createTool's output
   // We create a temporary tool instance to read its schema
   try {
@@ -134,6 +138,17 @@ function formatToolSchema(def: ToolDefinition): string {
  */
 export function createToolSearchTool(options: ToolSearchToolOptions): AgentTool {
   const { getDeferredTools, onToolsDiscovered } = options
+  const lastDiscoveredAt = new Map<string, number>()
+  const notifyDiscovered = (names: string[]): void => {
+    const now = Date.now()
+    const fresh = names.filter((name) => {
+      const last = lastDiscoveredAt.get(name)
+      if (last !== undefined && now - last < 30_000) return false
+      lastDiscoveredAt.set(name, now)
+      return true
+    })
+    if (fresh.length > 0) onToolsDiscovered(fresh)
+  }
 
   return {
     name: TOOL_SEARCH_TOOL_NAME,
@@ -185,7 +200,7 @@ export function createToolSearchTool(options: ToolSearchToolOptions): AgentTool 
         }
 
         // Trigger tool injection
-        onToolsDiscovered(found.map(t => t.name))
+        notifyDiscovered(found.map(t => t.name))
 
         const schemas = found.map(formatToolSchema).join('\n\n')
         const missingNote = missing.length > 0 ? `\n\nNote: these tools were not found: ${missing.join(', ')}` : ''
@@ -206,7 +221,7 @@ export function createToolSearchTool(options: ToolSearchToolOptions): AgentTool 
       }
 
       // Trigger tool injection
-      onToolsDiscovered(matches.map(t => t.name))
+      notifyDiscovered(matches.map(t => t.name))
 
       const schemas = matches.map(formatToolSchema).join('\n\n')
       return {

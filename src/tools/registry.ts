@@ -1,6 +1,7 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import type { Component } from '@earendil-works/pi-tui'
 import type { PermissionBehavior } from '../permissions/types.ts'
+import type { AgentSessionPersistence } from '../agent/persistence.ts'
 
 // ============================================================================
 // Types
@@ -24,16 +25,22 @@ export interface ToolResult {
 /** UI 组件构造器 */
 export type ToolUIConstructor = new (toolCallId: string, args: any) => ToolUIComponent
 
+export interface ToolCreationContext {
+  getPersistence?: () => AgentSessionPersistence | undefined
+}
+
 /** 工具定义 — 绑定工具的所有元数据 */
 export interface ToolDefinition {
   name: string
   defaultPermission: PermissionBehavior
-  createTool: (...args: any[]) => AgentTool<any, any>
+  createTool: (cwd: string, context?: ToolCreationContext) => AgentTool<any, any>
   ui?: ToolUIConstructor
   formatDescription?: (input: Record<string, unknown>) => string
   extractMatchContent?: (input: Record<string, unknown>) => string | undefined
   /** Tool description for keyword search matching. Used by ToolSearchTool. */
   description?: string
+  /** Precomputed JSON parameter schema used by ToolSearchTool. */
+  schema?: string
   /** If true, tool is hidden from initial context and discovered via ToolSearchTool. */
   shouldDefer?: boolean
 }

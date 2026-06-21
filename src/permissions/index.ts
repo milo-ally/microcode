@@ -9,5 +9,7 @@ export type {
   PermissionRuleSource,
   PermissionDecision,
   ToolPermissionContext,
+  PermissionSnapshot,
+  NonInteractivePermissionStrategy,
 } from './types.ts'
 export { PERMISSION_MODES } from './types.ts'

@@ -1,5 +1,4 @@
-import type { Agent, AgentEvent, AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core'
-import { generateSummary, DEFAULT_COMPACTION_SETTINGS } from '@earendil-works/pi-agent-core'
+import type { AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { Api, AssistantMessage } from '@earendil-works/pi-ai'
 import { completeSimple } from '@earendil-works/pi-ai'
 import {
@@ -16,9 +15,7 @@ import {
   type SlashCommand,
 } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
-import { resolveConfig, createModelForId, type ResolvedConfig } from '../config.ts'
 import { getAllModels, resolveApiKey } from '../models/index.ts'
-import { getSystemPrompt } from '../constants/prompts.ts'
 import { theme, getEditorTheme, getMarkdownTheme, getBashModeBorderColor } from './theme.ts'
 import { MicrocodeEditor } from './components/microcodeEditor.ts'
 import { FooterComponent } from './components/footer.ts'
@@ -48,10 +45,11 @@ import { TOOL_NAME as WRITE_TOOL_NAME } from '../tools/FileWriteTool/FileWriteTo
 import { TOOL_NAME as EDIT_TOOL_NAME } from '../tools/FileEditTool/FileEditTool.ts'
 import { addMcpServer, removeMcpServer, type ConfigScope } from '../mcp/configWrite.ts'
 import { SessionManager } from '../session/SessionManager.ts'
-import { getCompactionManager, getSkills, getSkillDiagnostics, rebuildCoreTools, isSkillLoaded, loadSkillIntoPrompt, unloadSkillFromPrompt } from '../agent.ts'
-import { readSkillBody, type Skill } from '../skill/skill.ts'
-import { createMcpTools, createListMcpResourcesTool, createReadMcpResourceTool, registerMcpToolsAsDeferred, getDeferredToolNames } from '../tools/index.ts'
-import { PermissionManager, type PermissionMode, PERMISSION_MODES } from '../permissions/index.ts'
+import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
+import type { Skill } from '../skill/skill.ts'
+import { type PermissionMode, PERMISSION_MODES } from '../permissions/index.ts'
+import type { TaskList } from '../tasks/TaskSystem.ts'
+import { MultiSelectList, type MultiSelectItem } from './components/multiSelectList.ts'
 
 declare const MACRO: {
   VERSION: string
@@ -71,10 +69,12 @@ function countStreamingLines(content: string): number {
 const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   { name: 'clear', description: 'Clear the conversation history' },
   { name: 'compact', description: 'Compress conversation context (usage: /compact [instructions])', argumentHint: '[instructions]' },
+  { name: 'status', description: 'Show context usage, token statistics, and model details' },
   { name: 'model', description: 'Show or switch model (usage: /model [model-id])', argumentHint: '[model-id]' },
   { name: 'thinking', description: 'Show or set thinking depth (usage: /thinking [level])', argumentHint: '[off|minimal|low|medium|high|xhigh]' },
   { name: 'mcp', description: 'Manage MCP servers (usage: /mcp [add|remove|enable|disable|reconnect] [args...])', argumentHint: '[action] [args...]' },
   { name: 'session', description: 'Browse and load saved sessions', argumentHint: '' },
+  { name: 'tasks', description: 'Browse tasks and prioritize unfinished work in the current session', argumentHint: '' },
   { name: 'new', description: 'Start a new conversation session' },
   { name: 'permission', description: 'Show or switch permission mode (usage: /permission [mode])', argumentHint: '[mode]' },
   { name: 'skills', description: 'Show available skills' },
@@ -88,7 +88,7 @@ export class App {
   private chatContainer: Container
   private statusContainer: Container
   private editorContainer: Container
-  private agent: Agent
+  private agent: MicrocodeAgent
   private editor!: MicrocodeEditor
   private footer: FooterComponent
   private isInitialized = false
@@ -97,15 +97,14 @@ export class App {
   private pendingTools = new Map<string, ToolUIComponent>()
   private pendingToolStartedAt = new Map<string, number>()
   private streamingToolLastRenderAt = new Map<string, number>()
-  private toolExecutionInProgress = false // Track if any tool is currently executing
+  private toolElapsedTimer?: ReturnType<typeof setInterval>
   private loadingAnimation?: Loader
   private lastSigintTime = 0
-  private config: ResolvedConfig
   private mcpClient?: McpClientManager
   private sessionManager: SessionManager
   private compacting = false
+  private compactionProgressText?: Text
   private permissionPromptActive = false
-  private permissionManager: PermissionManager
   private isBashMode = false
   private bashComponent?: BashExecutionComponent
   private startupWarnings: string[] = []
@@ -115,30 +114,21 @@ export class App {
   private titleGenerated = false
   onExit?: () => void | Promise<void>
 
-  constructor(agent: Agent, mcpClient?: McpClientManager, sessionManager?: SessionManager, permissionManager?: PermissionManager, modelId?: string, thinkingLevel?: ThinkingLevel) {
+  constructor(
+    agent: MicrocodeAgent,
+    mcpClient?: McpClientManager,
+    sessionManager?: SessionManager,
+  ) {
     this.agent = agent
     this.mcpClient = mcpClient
     this.sessionManager = sessionManager ?? new SessionManager()
-    this.permissionManager = permissionManager ?? new PermissionManager()
-    this.config = modelId ? createModelForId(modelId) : resolveConfig()
+    this.agent.setPersistence(this.sessionManager)
     this.ui = new TUI(new ProcessTerminal())
     this.headerContainer = new Container()
     this.chatContainer = new Container()
     this.statusContainer = new Container()
     this.editorContainer = new Container()
-    this.footer = new FooterComponent(
-      agent,
-      this.config.model.id,
-      this.config.provider,
-      process.cwd(),
-      thinkingLevel ?? agent.state.thinkingLevel,
-    )
-
-    // Initialize system prompt token count for context usage display
-    const compactionManager = getCompactionManager(agent)
-    if (compactionManager && agent.state.systemPrompt) {
-      compactionManager.setSystemPrompt(agent.state.systemPrompt)
-    }
+    this.footer = new FooterComponent(agent, process.cwd())
   }
 
   getSessionManager(): SessionManager {
@@ -204,7 +194,7 @@ export class App {
       const userInput = stripImagePathsFromText(rawInput)
 
       if (imagePaths.length > 0) {
-        if (modelSupportsImages(this.agent.state.model)) {
+        if (modelSupportsImages(this.agent.getCurrentModel())) {
           for (const filePath of imagePaths) {
             const image = tryReadImageFromPath(filePath)
             if (image) {
@@ -312,7 +302,7 @@ export class App {
         this.imagePathProcessing = true
 
         const newImages: CachedImage[] = []
-        if (modelSupportsImages(this.agent.state.model)) {
+        if (modelSupportsImages(this.agent.getCurrentModel())) {
           for (const filePath of imagePaths) {
             const image = tryReadImageFromPath(filePath)
             if (image) {
@@ -396,7 +386,7 @@ export class App {
         const query = textBeforeCursor.slice(1).toLowerCase()
         const builtinMatches = BUILTIN_SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(query))
 
-        const skills = getSkills(this.agent)
+        const skills = this.agent.getSkills()
         const skillMatches = skills
           .filter(s => !s.disableModelInvocation && s.name.startsWith(query))
           .map(s => ({
@@ -496,6 +486,10 @@ export class App {
         this.handleCompactCommand(args)
         return true
 
+      case '/status':
+        this.handleStatusCommand()
+        return true
+
       case '/model':
         this.handleModelCommand(args || undefined)
         return true
@@ -506,6 +500,10 @@ export class App {
 
       case '/session':
         this.handleSessionCommand(args)
+        return true
+
+      case '/tasks':
+        this.handleTasksCommand()
         return true
 
       case '/permission':
@@ -535,7 +533,7 @@ export class App {
       default: {
         // Check if command matches a loaded skill
         const skillName = command?.startsWith('/') ? command.slice(1) : ''
-        const skills = getSkills(this.agent)
+        const skills = this.agent.getSkills()
         const skill = skills.find(s => s.name === skillName && !s.disableModelInvocation)
         if (skill) {
           this.handleSkillSlashCommand(skill)
@@ -561,98 +559,23 @@ export class App {
       1,
       0,
     )
+    this.compactionProgressText = progressText
     this.chatContainer.addChild(progressText)
     this.ui.requestRender()
 
     try {
-      const session = this.sessionManager.getSession()
-      if (!session) throw new Error('No active session')
-
-      // Get session branch entries
-      const entries = await session.getBranch() as any[]
-
-      // Find the first actual message entry (skip session header, etc.)
-      const firstMsgEntry = entries.find(e => e.type === 'message')
-      if (!firstMsgEntry) throw new Error('No messages to compact')
-
-      // Extract messages to summarize (skip compaction entries, keep messages)
-      const messagesToSummarize: AgentMessage[] = []
-      for (const entry of entries) {
-        if (entry.type === 'message') {
-          const msg = entry.message
-          if (msg.role !== 'compactionSummary') {
-            messagesToSummarize.push(msg)
-          }
-        }
-      }
-      if (messagesToSummarize.length === 0) throw new Error('No messages to compact')
-
-      // Calculate tokens before compaction
-      const tokensBefore = messagesToSummarize.reduce((sum, m) => {
-        const content = typeof m.content === 'string' ? m.content 
-          : Array.isArray(m.content) ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
-          : ''
-        return sum + Math.ceil(content.length / 4)
-      }, 0)
-
-      // Generate summary via LLM
-      const summaryResult = await generateSummary(
-        messagesToSummarize,
-        this.agent.state.model,
-        DEFAULT_COMPACTION_SETTINGS.reserveTokens,
-        this.config.apiKey,
-        undefined,
-        undefined,
-        customInstructions,
-      )
-      if (!summaryResult.ok) {
-        throw new Error(`Summarization failed: ${summaryResult.error.message}`)
-      }
-      const summary = summaryResult.value
-      if (!summary || summary.trim().length === 0) {
-        throw new Error('Summarization returned empty summary')
-      }
-
-      // Record compaction in session tree with correct firstKeptEntryId
-      // Keep recent messages — find the entry that starts the recent window
-      const msgEntries = entries.filter((e: any) => e.type === 'message')
-      const keepMsgCount = Math.max(1, Math.floor(msgEntries.length * 0.3))
-      const firstKeptMsgEntry = msgEntries[msgEntries.length - keepMsgCount] ?? firstMsgEntry
-      const firstKeptEntryId = firstKeptMsgEntry.id
-      await session.appendCompaction(summary, firstKeptEntryId, tokensBefore)
-
-      // Build new agent messages: compaction summary + recent messages only
-      const summaryText = `The conversation history before this point was compacted into the following summary:\n\n<summary>\n${summary}\n</summary>`
-      const summaryMsg: AgentMessage = {
-        role: 'user',
-        content: [{ type: 'text', text: summaryText }],
-        timestamp: Date.now(),
-      }
-      const recentMessages = msgEntries.slice(-keepMsgCount).map((e: any) => e.message as AgentMessage)
-      const newMessages: AgentMessage[] = [summaryMsg, ...recentMessages]
-
-      // Update agent messages in-place
-      const agentMsgs = this.agent.state.messages as AgentMessage[]
-      agentMsgs.length = 0
-      for (const msg of newMessages) {
-        agentMsgs.push(msg)
-      }
-
-      // Set saved count to new length so next saveMessages only writes genuinely new messages
-      this.sessionManager.setSavedMessageCount(newMessages.length)
+      await this.agent.compact({
+        instructions: customInstructions,
+        persistToSession: true,
+      })
 
       // Update footer
       this.updateContextUsage()
       this.footer.invalidate()
-      const compactionManager = getCompactionManager(this.agent)
-      if (compactionManager) {
-        const usage = compactionManager.getContextUsage(agentMsgs)
-        progressText.setText(
-          theme.dim(`Compacted. Context: ${usage.percentUsed}% used (${Math.round(usage.tokens / 1000)}k/${Math.round(usage.contextWindow / 1000)}k)`),
-        )
-      } else {
-        progressText.setText(theme.dim('Compacted.'))
-      }
+      const usage = this.agent.getTokenStats().context
+      progressText.setText(
+        theme.dim(`Compacted. Context: ${usage.percentUsed}% used (${Math.round(usage.usedTokens / 1000)}k/${Math.round(usage.contextWindow / 1000)}k)`),
+      )
       this.chatContainer.addChild(new Spacer(1))
     } catch (error) {
       progressText.setText(
@@ -661,8 +584,89 @@ export class App {
       this.chatContainer.addChild(new Spacer(1))
     } finally {
       this.compacting = false
+      this.compactionProgressText = undefined
       this.ui.requestRender()
     }
+  }
+
+  private handleStatusCommand(): void {
+    const model = this.agent.getCurrentModel()
+    const tokenStats = this.agent.getTokenStats()
+    const { context: usage, session } = tokenStats
+
+    const formatTokens = (value: number): string => value.toLocaleString('en-US')
+    const formatPrice = (value: number): string => {
+      if (value === 0) return '$0'
+      if (value < 0.0001) return `$${value.toFixed(6)}`
+      return `$${value.toFixed(4)}`
+    }
+    const formatRate = (value: number): string => `$${value.toLocaleString('en-US', { maximumFractionDigits: 6 })}`
+    const yesNo = (value: boolean): string => value ? 'yes' : 'no'
+
+    const lines: string[] = [
+      theme.fg('accent', 'Status'),
+      '',
+      theme.bold('Context window'),
+    ]
+
+    const ratio = Math.min(1, Math.max(0, usage.usedTokens / usage.contextWindow))
+    const barWidth = 24
+    const filled = Math.round(ratio * barWidth)
+    const bar = `${'█'.repeat(filled)}${'░'.repeat(barWidth - filled)}`
+    lines.push(
+      `  ${theme.fg('accent', bar)}  ${usage.percentUsed}% used`,
+      `  Used       ${formatTokens(usage.usedTokens)} / ${formatTokens(usage.contextWindow)} tokens`,
+      `  Remaining  ${formatTokens(usage.remainingTokens)} tokens (${usage.percentRemaining}%)`,
+      `  Breakdown  system ${formatTokens(usage.systemPromptTokens)} + messages ${formatTokens(usage.messageTokens)}`,
+    )
+
+    lines.push(
+      '',
+      theme.bold('Session API usage'),
+      `  Requests    ${formatTokens(session.requests)}`,
+      `  Input       ${formatTokens(session.inputTokens)} tokens`,
+      `  Output      ${formatTokens(session.outputTokens)} tokens`,
+      `  Cache       ${formatTokens(session.cacheReadTokens)} read / ${formatTokens(session.cacheWriteTokens)} write`,
+      `  Total       ${formatTokens(session.totalTokens)} reported tokens`,
+      `  Cost        ${formatPrice(session.totalCost)}`,
+      '',
+      theme.bold('Model'),
+      `  Name        ${model.name ?? model.id}`,
+      `  ID          ${model.id}`,
+      `  Provider    ${model.provider}`,
+      `  API         ${model.api}`,
+      `  Base URL    ${model.baseUrl}`,
+      `  Context     ${formatTokens(model.contextWindow)} tokens`,
+      `  Max output  ${formatTokens(model.maxTokens)} tokens`,
+      `  Reasoning   ${yesNo(model.reasoning)}${model.reasoning ? ` (current: ${this.agent.getThinkingLevel()})` : ''}`,
+      `  Input       ${model.input.join(', ')}`,
+      `  API key     ${this.agent.getApiKey() ? 'configured' : 'not configured'}`,
+      '',
+      theme.bold('Pricing per 1M tokens'),
+      `  Input       ${formatRate(model.cost.input)}`,
+      `  Output      ${formatRate(model.cost.output)}`,
+      `  Cache read  ${formatRate(model.cost.cacheRead)}`,
+      `  Cache write ${formatRate(model.cost.cacheWrite)}`,
+      '',
+      theme.dim('Context values are local estimates; session usage and cost are reported by the provider.'),
+    )
+
+    const modelUsages = Object.values(tokenStats.byModel)
+    if (modelUsages.length > 0) {
+      lines.push('', theme.bold('Usage by model'))
+      for (const modelUsage of modelUsages) {
+        lines.push(
+          `  ${modelUsage.modelId} (${modelUsage.provider}, ${modelUsage.api})`,
+          `    ${formatTokens(modelUsage.requests)} requests · ${formatTokens(modelUsage.totalTokens)} tokens · ${formatPrice(modelUsage.totalCost)}`,
+        )
+      }
+    }
+
+    for (const line of lines) {
+      this.chatContainer.addChild(new Text(line, 1, 0))
+    }
+    this.chatContainer.addChild(new Spacer(1))
+    this.ui.requestRender()
   }
 
   private async handleSessionCommand(_args: string): Promise<void> {
@@ -751,15 +755,11 @@ export class App {
       }
 
       try {
-        // Save current session then load target
-        const messages = await this.sessionManager.switchToSession(
-          selected,
-          this.agent.state.messages as AgentMessage[],
-        )
+        await this.agent.persistMessages()
+        const messages = await this.sessionManager.switchToSession(selected)
 
         // Replace messages on agent
-        this.agent.state.messages.length = 0
-        this.agent.state.messages.push(...messages)
+        this.agent.replaceMessages(messages, 'rebuild')
 
         // Rebuild system prompt preserving loaded skills
         this.rebuildSystemPromptForResume()
@@ -793,16 +793,216 @@ export class App {
     selectList.onCancel = () => finish(undefined)
   }
 
+  private async handleTasksCommand(): Promise<void> {
+    if (!this.sessionManager.getSessionId()) {
+      this.showError('No active session.')
+      return
+    }
+
+    let lists: TaskList[]
+    try {
+      lists = await this.sessionManager.listTaskLists()
+    } catch (error) {
+      this.showError(`Failed to load tasks: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+
+    if (lists.length === 0) {
+      this.chatContainer.addChild(
+        new Text(theme.dim('No task lists in the current session.'), 1, 0),
+      )
+      this.chatContainer.addChild(new Spacer(1))
+      this.ui.requestRender()
+      return
+    }
+
+    const listItems: SelectItem[] = lists.map((list) => {
+      const completed = list.tasks.filter((task) => task.completed).length
+      return {
+        value: list.id,
+        label: `${completed === list.tasks.length ? '✓' : '▣'} ${list.title}`,
+        description: `${completed}/${list.tasks.length} completed  ${list.id}`,
+      }
+    })
+    listItems.push({
+      value: '__cancel__',
+      label: 'Cancel',
+      description: 'Return without opening a task list',
+    })
+
+    const listSelect = new SelectList(listItems, Math.min(listItems.length, 10), {
+      selectedPrefix: (text) => chalk.cyan(text),
+      selectedText: (text) => chalk.cyan(text),
+      description: (text) => theme.dim(text),
+      scrollInfo: (text) => theme.dim(text),
+      noMatch: (text) => theme.dim(text),
+    })
+    const heading = new Text(
+      theme.fg('accent', 'Task lists in this session:'),
+      1,
+      0,
+    )
+    this.chatContainer.addChild(heading)
+    this.chatContainer.addChild(listSelect)
+    this.ui.setFocus(listSelect)
+    this.ui.requestRender()
+
+    let finished = false
+    let activeSelect: Component = listSelect
+    const close = (message?: string) => {
+      if (finished) return
+      finished = true
+      removeListener()
+      this.chatContainer.removeChild(activeSelect)
+      if (message) this.chatContainer.addChild(new Text(message, 1, 0))
+      this.chatContainer.addChild(new Spacer(1))
+      this.ui.setFocus(this.editor)
+      this.ui.requestRender()
+    }
+    const removeListener = this.ui.addInputListener((data) => {
+      if (data === '\x03') {
+        close(theme.dim('Closed task browser.'))
+        return { consume: true }
+      }
+      return undefined
+    })
+
+    const showTasks = (list: TaskList) => {
+      this.chatContainer.removeChild(activeSelect)
+      heading.setText(
+        `${theme.fg('accent', list.title)}  ${theme.dim('(Space toggle · Enter confirm · Esc back)')}`,
+      )
+
+      // Track original reminder state so we can compute toggle diffs
+      const reminderBefore = new Map<string, boolean>()
+      const preSelected: number[] = []
+      const taskItems: MultiSelectItem[] = list.tasks.map((task, index) => {
+        reminderBefore.set(task.id, task.reminder === true)
+        if (task.reminder) preSelected.push(index)
+        const marker = task.pending ? '◌ ' : '  '
+        return {
+          value: task.id,
+          label: `${marker}${task.content}`,
+          description: task.completed
+            ? `${task.id}  completed`
+            : task.pending
+              ? `${task.id}  pending`
+              : `${task.id}`,
+          disabled: task.completed,
+        }
+      })
+      const taskSelect = new MultiSelectList(
+        taskItems,
+        Math.min(taskItems.length, 14),
+        {
+          selectedText: (text) => chalk.cyan(text),
+          disabledText: (text) => theme.dim(text),
+          description: (text) => theme.dim(text),
+          scrollInfo: (text) => theme.dim(text),
+        },
+        preSelected.length > 0 ? preSelected : undefined,
+      )
+      activeSelect = taskSelect
+      this.chatContainer.addChild(taskSelect)
+      this.ui.setFocus(taskSelect)
+      this.ui.requestRender()
+
+      taskSelect.onConfirm = async (selected) => {
+        const selectedIds = new Set(selected.map((item) => item.value))
+
+        const toAdd: string[] = []
+        const toRemove: string[] = []
+
+        for (const task of list.tasks) {
+          if (task.completed) continue
+          const wasReminded = reminderBefore.get(task.id) ?? false
+          const isNowSelected = selectedIds.has(task.id)
+          if (!wasReminded && isNowSelected) {
+            toAdd.push(task.id)
+          } else if (wasReminded && !isNowSelected) {
+            toRemove.push(task.id)
+          }
+        }
+
+        if (toAdd.length === 0 && toRemove.length === 0) {
+          close()
+          return
+        }
+
+        const added: string[] = []
+        const removed: string[] = []
+        const errors: string[] = []
+        for (const id of toAdd) {
+          const task = list.tasks.find((t) => t.id === id)!
+          try {
+            await this.sessionManager.remindTask(list.id, id, true)
+            added.push(task.content)
+          } catch (error) {
+            errors.push(`${task.content}: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+        for (const id of toRemove) {
+          const task = list.tasks.find((t) => t.id === id)!
+          try {
+            await this.sessionManager.remindTask(list.id, id, false)
+            removed.push(task.content)
+          } catch (error) {
+            errors.push(`${task.content}: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+
+        let message = ''
+        if (added.length > 0) {
+          message += `${theme.fg('accent', '◆')} Prioritized ${added.length} task${added.length > 1 ? 's' : ''}:\n`
+          for (const content of added) {
+            message += `  ${theme.fg('text', content)}\n`
+          }
+        }
+        if (removed.length > 0) {
+          message += `${theme.dim('✕')} Removed ${removed.length} task${removed.length > 1 ? 's' : ''}:\n`
+          for (const content of removed) {
+            message += `  ${theme.dim(content)}\n`
+          }
+        }
+        if (added.length > 0 || removed.length > 0) {
+          message += `  ${theme.dim('Microcode will be reminded until each task is marked complete.')}`
+        }
+        if (errors.length > 0) {
+          message += `\n${theme.fg('error', `Failed: ${errors.join('; ')}`)}`
+        }
+        close(message || undefined)
+      }
+
+      taskSelect.onCancel = () => {
+        this.chatContainer.removeChild(taskSelect)
+        activeSelect = listSelect
+        heading.setText(theme.fg('accent', 'Task lists in this session:'))
+        this.chatContainer.addChild(listSelect)
+        this.ui.setFocus(listSelect)
+        this.ui.requestRender()
+      }
+    }
+
+    listSelect.onSelect = (item) => {
+      if (item.value === '__cancel__') {
+        close(theme.dim('Closed task browser.'))
+        return
+      }
+      const list = lists.find((candidate) => candidate.id === item.value)
+      if (list) showTasks(list)
+    }
+    listSelect.onCancel = () => close(theme.dim('Closed task browser.'))
+  }
+
   private async handleNewSession(): Promise<void> {
-    // Save current session
-    await this.sessionManager.saveMessages(this.agent.state.messages as AgentMessage[])
+    await this.agent.persistMessages()
 
     // Create new session
     const cwd = process.cwd()
     await this.sessionManager.create(cwd)
 
     // Reset state
-    this.agent.state.messages.length = 0
+    this.agent.clearMessages()
     this.titleGenerated = false
     this.footer.setSessionTitle(null)
     this.footer.invalidate()
@@ -818,7 +1018,7 @@ export class App {
   }
 
   private async generateSessionTitle(): Promise<void> {
-    const messages = this.agent.state.messages as AgentMessage[]
+    const messages = this.agent.getMessages()
     const firstUser = messages.find((m) => m.role === 'user')
     if (!firstUser) return
 
@@ -839,7 +1039,7 @@ export class App {
 
     let title = fallbackTitle
     try {
-      const model = this.agent.state.model
+      const model = this.agent.getCurrentModel()
       const apiKey = resolveApiKey(model)
       const result = await completeSimple(model, {
         systemPrompt: 'Generate a short, concise title (5 words max) for a conversation. Reply with ONLY the title, no quotes, no explanation.',
@@ -867,24 +1067,7 @@ export class App {
    * Rebuild system prompt for a resumed session, preserving loaded skills.
    */
   private rebuildSystemPromptForResume(): void {
-    const basePrompt = (this.agent as any).__baseSystemPrompt as string
-    const loadedSkills = (this.agent as any).__loadedSkills as Map<string, string> | undefined
-
-    if (basePrompt) {
-      let prompt = basePrompt
-      if (loadedSkills && loadedSkills.size > 0) {
-        for (const [name, body] of loadedSkills) {
-          prompt += `\n\n# Skill: ${name}\n\n${body}`
-        }
-      }
-      this.agent.state.systemPrompt = prompt
-    }
-
-    // Update compaction manager with new system prompt
-    const compactionManager = getCompactionManager(this.agent)
-    if (compactionManager) {
-      compactionManager.setSystemPrompt(this.agent.state.systemPrompt)
-    }
+    this.agent.refreshSystemPrompt()
   }
 
   /**
@@ -928,8 +1111,9 @@ export class App {
 
     // Show selectable model list
     const models = getAllModels()
-    const currentId = this.config.model.id
-    const currentApi = this.config.model.api
+    const currentModel = this.agent.getCurrentModel()
+    const currentId = currentModel.id
+    const currentApi = currentModel.api
 
     // Detect duplicate IDs to show protocol info
     const idCounts = new Map<string, number>()
@@ -1005,32 +1189,17 @@ export class App {
   /** Switch to a model by ID and update all dependent state. */
   private switchModel(modelId: string, api?: Api): void {
     try {
-      const { model, apiKey, provider } = createModelForId(modelId, api)
-
-      this.agent.state.model = model
-      this.config = { model, apiKey, provider }
+      const snapshot = this.agent.switchModel(modelId, api)
+      const model = snapshot.model
 
       // Clear image state on model switch
       this.clearPendingImages()
       this.suppressTrailingQuote = false
 
-      // Rebuild tools for new model (adds/removes vision tool based on capability)
-      rebuildCoreTools(this.agent, process.cwd())
-
-      // Update compaction manager with new model and API key
-      const compactionManager = getCompactionManager(this.agent)
-      if (compactionManager) {
-        compactionManager.setModel(model)
-        compactionManager.setApiKey(apiKey)
-      }
-
-      // Rebuild system prompt with new model ID (preserve MCP info)
-      this.rebuildSystemPrompt(this.mcpClient?.getServerStates())
-
       // Rebuild footer with new model info
-      this.rebuildFooter()
+      this.footer.invalidate()
 
-      this.showStatus(`Model switched to: ${model.id} (${provider}, ${model.api})`)
+      this.showStatus(`Model switched to: ${model.id} (${snapshot.provider}, ${model.api})`)
     } catch (error) {
       this.showError(error instanceof Error ? error.message : String(error))
     }
@@ -1204,15 +1373,7 @@ export class App {
         if (server?.status === 'connected') {
           this.showStatus(`MCP server "${name}" connected with ${server.tools.length} tool(s)`)
 
-          // Register MCP tools as deferred (discovered via ToolSearchTool)
-          registerMcpToolsAsDeferred(this.mcpClient)
-
-          // Inject resource tools directly (they're always needed)
-          const resourceTools = [
-            createListMcpResourcesTool(this.mcpClient),
-            createReadMcpResourceTool(this.mcpClient),
-          ]
-          this.agent.state.tools = [...this.agent.state.tools, ...resourceTools]
+          this.agent.configureMcpTools(this.mcpClient)
 
           // Rebuild system prompt with updated MCP info and deferred tool names
           this.rebuildSystemPrompt(this.mcpClient.getServerStates())
@@ -1240,31 +1401,12 @@ export class App {
   }
 
   private rebuildFooter(): void {
-    const oldFooter = this.footer
-    this.footer = new FooterComponent(this.agent, this.config.model.id, this.config.provider, process.cwd(), this.agent.state.thinkingLevel)
-    this.ui.removeChild(oldFooter)
-    this.ui.addChild(this.footer)
-    // Restore context usage on the new footer
-    this.updateContextUsage()
+    this.footer.invalidate()
     this.ui.requestRender()
   }
 
   private rebuildSystemPrompt(mcpServers?: McpServerState[]): void {
-    const deferredToolNames = getDeferredToolNames()
-    const sections = getSystemPrompt({
-      cwd: process.cwd(),
-      modelId: this.config.model.id,
-      mcpServers,
-      skills: getSkills(this.agent),
-      deferredToolNames: deferredToolNames.length > 0 ? deferredToolNames : undefined,
-    })
-    this.agent.state.systemPrompt = sections.join('\n\n')
-
-    // Update compaction manager with system prompt token count
-    const compactionManager = getCompactionManager(this.agent)
-    if (compactionManager) {
-      compactionManager.setSystemPrompt(this.agent.state.systemPrompt)
-    }
+    this.agent.updateMcpServers(mcpServers)
   }
 
   updateMcpState(mcpClient: McpClientManager): void {
@@ -1292,7 +1434,7 @@ export class App {
   }
 
   private static PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
-    'default': 'Read: auto-allow | Write/Edit/Bash: prompt before execution',
+    'interactive': 'Read: auto-allow | Write/Edit/Bash: prompt before execution',
     'auto-approve': 'All tools execute without confirmation (YOLO mode)',
     'plan': 'Read-only — all write/edit/bash operations are blocked',
   }
@@ -1301,7 +1443,7 @@ export class App {
     const mode = args.trim().toLowerCase() as PermissionMode
 
     if (!mode) {
-      const current = this.permissionManager.getMode()
+      const current = this.agent.getPermissionMode()
       const items: SelectItem[] = PERMISSION_MODES.map((m) => ({
         value: m,
         label: m,
@@ -1343,7 +1485,7 @@ export class App {
         this.chatContainer.removeChild(selectList)
 
         if (selectedMode) {
-          this.permissionManager.setMode(selectedMode)
+          this.agent.setPermissionMode(selectedMode)
           this.showStatus(`Permission mode set to: ${selectedMode}`)
         }
 
@@ -1368,7 +1510,7 @@ export class App {
       return
     }
 
-    this.permissionManager.setMode(mode)
+    this.agent.setPermissionMode(mode)
     this.showStatus(`Permission mode set to: ${mode}`)
   }
 
@@ -1386,7 +1528,7 @@ export class App {
     const level = args.trim().toLowerCase() as ThinkingLevel
 
     if (!level) {
-      const current = this.agent.state.thinkingLevel
+      const current = this.agent.getThinkingLevel()
       const items: SelectItem[] = App.THINKING_LEVELS.map((l) => ({
         value: l,
         label: l,
@@ -1429,8 +1571,8 @@ export class App {
         this.chatContainer.removeChild(selectList)
 
         if (selectedLevel) {
-          this.agent.state.thinkingLevel = selectedLevel
-          this.footer.setThinkingLevel(selectedLevel)
+          this.agent.setThinkingLevel(selectedLevel)
+          this.footer.invalidate()
           this.showStatus(`Thinking level set to: ${selectedLevel}`)
         }
 
@@ -1455,14 +1597,15 @@ export class App {
       return
     }
 
-    this.agent.state.thinkingLevel = level
-    this.footer.setThinkingLevel(level)
+    this.agent.setThinkingLevel(level)
+    this.footer.invalidate()
     this.showStatus(`Thinking level set to: ${level}`)
   }
 
   private handleSkillsCommand(): void {
-    const skills = getSkills(this.agent)
-    const diagnostics = getSkillDiagnostics(this.agent)
+    const skillSnapshot = this.agent.getSkillSnapshot()
+    const skills = skillSnapshot.available
+    const diagnostics = skillSnapshot.diagnostics
 
     if (skills.length === 0) {
       this.chatContainer.addChild(
@@ -1479,7 +1622,7 @@ export class App {
 
       for (const skill of skills) {
         const disabled = skill.disableModelInvocation ? theme.dim(' (disabled)') : ''
-        const loaded = isSkillLoaded(this.agent, skill.name) ? chalk.green(' (loaded)') : theme.dim(' (unloaded)')
+        const loaded = this.agent.isSkillLoaded(skill.name) ? chalk.green(' (loaded)') : theme.dim(' (unloaded)')
         this.chatContainer.addChild(
           new Text(`${theme.bold(skill.name)}${disabled}${loaded}`, 1, 0),
         )
@@ -1510,7 +1653,7 @@ export class App {
   }
 
   private handleSkillSlashCommand(skill: Skill): void {
-    const currentlyLoaded = isSkillLoaded(this.agent, skill.name)
+    const currentlyLoaded = this.agent.isSkillLoaded(skill.name)
 
     const statusText = currentlyLoaded
       ? chalk.green('loaded')
@@ -1567,8 +1710,7 @@ export class App {
 
       if (value === 'load') {
         try {
-          const body = readSkillBody(skill)
-          loadSkillIntoPrompt(this.agent, skill, body)
+          this.agent.loadSkill(skill.name)
           this.chatContainer.addChild(
             new Text(theme.fg('accent', `Loaded skill '${skill.name}' into system prompt.`), 1, 0),
           )
@@ -1578,7 +1720,7 @@ export class App {
           )
         }
       } else if (value === 'unload') {
-        unloadSkillFromPrompt(this.agent, skill.name)
+        this.agent.unloadSkill(skill.name)
         this.chatContainer.addChild(
           new Text(theme.fg('accent', `Unloaded skill '${skill.name}' from system prompt.`), 1, 0),
         )
@@ -1741,7 +1883,8 @@ export class App {
     description: string,
   ): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      // Pause spinner while waiting for user decision
+      // Permission waiting is not tool execution time.
+      this.pauseToolElapsedTimer()
       this.hideWorking()
       this.permissionPromptActive = true
 
@@ -1794,8 +1937,15 @@ export class App {
         const resultText = approved ? 'Approved' : 'Denied'
         this.chatContainer.addChild(new Text(`${icon} ${resultText}`, 1, 0))
         this.chatContainer.addChild(new Spacer(1))
-        // Resume spinner if approved - agent will continue responding
-        if (approved) this.showWorking()
+        // Start timing from approval, when execution is allowed to continue.
+        if (approved) {
+          this.resumeToolElapsedTimer()
+          this.showWorking()
+        }
+        else {
+          this.clearPendingToolState()
+          this.hideWorking()
+        }
         // Restore focus to editor so user can type again
         this.ui.setFocus(this.editor)
         this.ui.requestRender()
@@ -1805,7 +1955,7 @@ export class App {
 
       selectList.onSelect = (item) => {
         if (item.value === 'allow-session') {
-          this.permissionManager.addSessionRule(toolName, ruleContent)
+          this.agent.addSessionPermission(toolName, ruleContent)
         }
         finish(item.value === 'allow' || item.value === 'allow-session')
       }
@@ -1826,20 +1976,18 @@ export class App {
     }
   }
 
-  getPermissionManager(): PermissionManager {
-    return this.permissionManager
-  }
-
   private showHelp(): void {
     const helpText = [
       `${theme.fg('accent', 'Available Commands:')}`,
       '',
       `  ${theme.bold('/clear')}              Clear the conversation history`,
       `  ${theme.bold('/compact')} [instr.]    Compress conversation context`,
+      `  ${theme.bold('/status')}             Show context usage, token statistics, and model details`,
       `  ${theme.bold('/model')} [model-id]   Show current model or switch to a different model`,
       `  ${theme.bold('/thinking')} [level]   Show or set thinking depth`,
       `  ${theme.bold('/mcp')}                Manage MCP servers (add/remove/enable/disable)`,
       `  ${theme.bold('/session')}            Browse and load saved sessions`,
+      `  ${theme.bold('/tasks')}              Browse and prioritize tasks in the current session`,
       `  ${theme.bold('/new')}                Start a new conversation session`,
       `  ${theme.bold('/permission')} [mode]  Show or switch permission mode`,
       `  ${theme.bold('/exit')}               Exit Microcode`,
@@ -1869,7 +2017,7 @@ export class App {
     ]
 
     // Add available skills
-    const skills = getSkills(this.agent)
+    const skills = this.agent.getSkills()
     if (skills.length > 0) {
       helpText.push('')
       helpText.push(`${theme.fg('accent', 'Available Skills:')}`)
@@ -1940,8 +2088,12 @@ export class App {
   }
 
   private setupAgentSubscription(): void {
-    this.agent.subscribe((event: AgentEvent) => {
+    this.agent.subscribe((event: MicrocodeAgentEvent) => {
       switch (event.type) {
+        case 'compaction_changed':
+          this.updateCompactionProgress(event.progress)
+          break
+
         case 'agent_start':
           this.showWorking()
           break
@@ -2002,8 +2154,8 @@ export class App {
           }
           this.pendingTools.set(event.toolCallId, component)
           this.pendingToolStartedAt.set(event.toolCallId, performance.now())
-          this.toolExecutionInProgress = true
-          // Ensure spinner is visible during tool execution
+          this.startToolElapsedTimer()
+          // Keep the global working indicator alive across the model -> tool handoff.
           this.showWorking()
           this.commitToolFrame()
           break
@@ -2039,22 +2191,29 @@ export class App {
             if (component.updateDetails && event.result.details) {
               component.updateDetails(event.result.details)
             }
-            this.pendingTools.delete(event.toolCallId)
-            this.pendingToolStartedAt.delete(event.toolCallId)
-            this.streamingToolLastRenderAt.delete(event.toolCallId)
-            if (this.pendingTools.size === 0) {
-              this.toolExecutionInProgress = false
-            }
             this.updateContextUsage()
             this.footer.invalidate()
-            this.ui.requestRender()
           }
+          this.pendingTools.delete(event.toolCallId)
+          this.pendingToolStartedAt.delete(event.toolCallId)
+          this.streamingToolLastRenderAt.delete(event.toolCallId)
+          this.stopToolElapsedTimerIfIdle()
+          this.ui.requestRender()
           break
         }
 
         case 'turn_end':
-          // Don't hide spinner if tools are still executing
-          if (!this.toolExecutionInProgress) {
+          if (
+            event.message.role === 'assistant' &&
+            (event.message.stopReason === 'aborted' || event.message.stopReason === 'error')
+          ) {
+            this.clearPendingToolState()
+            this.hideWorking()
+          // A streamed tool call may already be pending before tool_execution_start.
+          // Do not hide Working during that model -> tool handoff.
+          } else if (this.pendingTools.size > 0) {
+            this.showWorking()
+          } else {
             this.hideWorking()
           }
           if (event.message.role === 'assistant' && event.message.stopReason === 'aborted') {
@@ -2073,15 +2232,26 @@ export class App {
             this.titleGenerated = true
             void this.generateSessionTitle()
           }
-          // Save messages to session after each turn
-          void this.sessionManager.saveMessages(this.agent.state.messages as AgentMessage[])
+          void this.agent.persistMessages()
           this.updateContextUsage()
           this.footer.invalidate()
           this.ui.requestRender()
           break
 
         case 'agent_end':
-          this.hideWorking()
+          if (!this.isAgentBusy()) {
+            this.clearPendingToolState()
+            this.hideWorking()
+            this.ui.requestRender()
+            break
+          }
+          // Some agent implementations emit agent_end for the model turn before
+          // executing its requested tools. Pending tools still mean real work remains.
+          if (this.pendingTools.size === 0) {
+            this.hideWorking()
+          } else {
+            this.showWorking()
+          }
           this.ui.requestRender()
           break
       }
@@ -2105,7 +2275,9 @@ export class App {
         component.markExecutionStarted()
         this.chatContainer.addChild(component)
         this.pendingTools.set(toolCall.id, component)
-        this.pendingToolStartedAt.set(toolCall.id, performance.now())
+        // The tool is pending as soon as its call starts streaming. Waiting for
+        // tool_execution_start creates a visible gap where Working disappears.
+        this.showWorking()
       } else {
         component.updateArgs?.(args)
       }
@@ -2170,13 +2342,107 @@ export class App {
     this.ui.requestRender()
   }
 
-  private updateContextUsage(): void {
-    const compactionManager = getCompactionManager(this.agent)
-    if (!compactionManager) return
+  private updateCompactionProgress(
+    progress: Extract<
+      MicrocodeAgentEvent,
+      { type: 'compaction_changed' }
+    >['progress'],
+  ): void {
+    if (!this.compactionProgressText) {
+      this.compactionProgressText = new Text('', 1, 0)
+      this.chatContainer.addChild(this.compactionProgressText)
+    }
 
-    const messages = this.agent.state.messages as AgentMessage[]
-    const usage = compactionManager.getContextUsage(messages)
-    this.footer.setContextUsage(usage.percentUsed, usage.tokens, usage.contextWindow)
+    const percent = Math.max(0, Math.min(100, progress.progress ?? 0))
+    const width = 20
+    const filled = Math.round((percent / 100) * width)
+    const bar =
+      `${'█'.repeat(filled)}${'░'.repeat(Math.max(0, width - filled))}`
+    const elapsed = progress.elapsedMs === undefined
+      ? ''
+      : ` ${(progress.elapsedMs / 1000).toFixed(1)}s`
+    const units =
+      progress.totalUnits !== undefined && progress.processedUnits !== undefined
+        ? ` · ${progress.processedUnits}/${progress.totalUnits} units`
+        : ''
+    const color = progress.phase === 'done' &&
+      progress.message.startsWith('Compaction failed')
+      ? (text: string) => chalk.hex('#cc6666')(text)
+      : (text: string) => theme.fg('accent', text)
+    this.compactionProgressText.setText(
+      color(`${bar} ${percent}% ${progress.message}${units}${elapsed}`),
+    )
+
+    if (progress.phase === 'done' && !this.compacting) {
+      this.chatContainer.addChild(new Spacer(1))
+      this.compactionProgressText = undefined
+    }
+    this.ui.requestRender()
+  }
+
+  private updateContextUsage(): void {
+    this.footer.invalidate()
+  }
+
+  private startToolElapsedTimer(): void {
+    if (this.toolElapsedTimer) return
+
+    this.toolElapsedTimer = setInterval(() => {
+      const now = performance.now()
+      let updated = false
+
+      for (const [toolCallId, startedAt] of this.pendingToolStartedAt) {
+        const component = this.pendingTools.get(toolCallId)
+        if (!component?.updateElapsed) continue
+        component.updateElapsed(now - startedAt)
+        updated = true
+      }
+
+      if (updated) {
+        this.ui.requestRender()
+      }
+    }, 100)
+  }
+
+  private stopToolElapsedTimerIfIdle(): void {
+    if (this.pendingToolStartedAt.size > 0 || !this.toolElapsedTimer) return
+    clearInterval(this.toolElapsedTimer)
+    this.toolElapsedTimer = undefined
+  }
+
+  private pauseToolElapsedTimer(): void {
+    if (this.toolElapsedTimer) {
+      clearInterval(this.toolElapsedTimer)
+      this.toolElapsedTimer = undefined
+    }
+
+    this.pendingToolStartedAt.clear()
+    for (const component of this.pendingTools.values()) {
+      component.updateElapsed?.(0)
+    }
+    this.ui.requestRender()
+  }
+
+  private resumeToolElapsedTimer(): void {
+    const startedAt = performance.now()
+    for (const [toolCallId, component] of this.pendingTools) {
+      if (!component.updateElapsed) continue
+      component.updateElapsed(0)
+      this.pendingToolStartedAt.set(toolCallId, startedAt)
+    }
+    if (this.pendingToolStartedAt.size > 0) {
+      this.startToolElapsedTimer()
+    }
+  }
+
+  private clearPendingToolState(): void {
+    this.pendingTools.clear()
+    this.pendingToolStartedAt.clear()
+    this.streamingToolLastRenderAt.clear()
+    if (this.toolElapsedTimer) {
+      clearInterval(this.toolElapsedTimer)
+      this.toolElapsedTimer = undefined
+    }
   }
 
   private showWorking(): void {
@@ -2186,7 +2452,6 @@ export class App {
         (text: string) => chalk.hex('#00d7ff')(text),
         (text: string) => chalk.hex('#666666')(text),
         'Working...',
-        { frames: [] },
       )
       this.loadingAnimation.start()
       this.statusContainer.clear()
@@ -2205,11 +2470,15 @@ export class App {
   }
 
   stop(): void {
+    if (this.toolElapsedTimer) {
+      clearInterval(this.toolElapsedTimer)
+      this.toolElapsedTimer = undefined
+    }
     this.ui.stop()
   }
 
   private isAgentBusy(): boolean {
-    return this.agent.state.isStreaming || this.agent.state.pendingToolCalls.size > 0
+    return this.agent.isBusy()
   }
 
   private exit(): void {

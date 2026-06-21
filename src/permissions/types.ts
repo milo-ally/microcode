@@ -9,7 +9,7 @@
 // Permission Modes
 // ============================================================================
 
-export const PERMISSION_MODES = ['default', 'auto-approve', 'plan'] as const
+export const PERMISSION_MODES = ['interactive', 'auto-approve', 'plan'] as const
 export type PermissionMode = (typeof PERMISSION_MODES)[number]
 
 // ============================================================================
@@ -17,6 +17,8 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number]
 // ============================================================================
 
 export type PermissionBehavior = 'allow' | 'deny' | 'ask'
+
+export type NonInteractivePermissionStrategy = 'deny' | 'delegate-to-parent'
 
 // ============================================================================
 // Permission Rules
@@ -57,4 +59,12 @@ export interface ToolPermissionContext {
   allowRules: PermissionRule[]
   denyRules: PermissionRule[]
   askRules: PermissionRule[]
+}
+
+export interface PermissionSnapshot {
+  readonly mode: PermissionMode
+  readonly nonInteractiveStrategy: NonInteractivePermissionStrategy
+  readonly allowRules: readonly Readonly<PermissionRule>[]
+  readonly denyRules: readonly Readonly<PermissionRule>[]
+  readonly askRules: readonly Readonly<PermissionRule>[]
 }

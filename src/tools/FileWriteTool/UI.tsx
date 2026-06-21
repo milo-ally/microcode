@@ -29,6 +29,8 @@ interface FileWriteDetails {
   isNewFile?: boolean
   preview?: string
   phase?: 'preparing' | 'writing' | 'complete'
+  warning?: string
+  written?: boolean
 }
 
 const NEW_FILE_PREVIEW_LINES = 8
@@ -85,14 +87,14 @@ export class FileWriteToolUI extends Container {
 
   private rebuild(): void {
     const bgFn = this.result && !this.executionStarted
-      ? this.result.isError
+      ? this.result.isError || this.details?.written === false
         ? (text: string) => theme.bg('toolErrorBg', text)
         : (text: string) => theme.bg('toolSuccessBg', text)
       : (text: string) => theme.bg('toolPendingBg', text)
     this.contentBox.setBgFn(bgFn)
 
     const icon = this.result && !this.executionStarted
-      ? this.result.isError
+      ? this.result.isError || this.details?.written === false
         ? theme.fg('error', '✗')
         : theme.fg('success', '✓')
       : this.executionStarted
@@ -104,6 +106,15 @@ export class FileWriteToolUI extends Container {
     const header = `${icon} ${chalk.bold('write')} ${theme.fg('accent', shortPath)}`
 
     this.contentBox.clear()
+
+    if (this.details?.written === false && this.details.warning) {
+      this.contentBox.addChild(
+        new Text(
+          `${header} ${theme.fg('warning', 'not written')}\n  ${theme.fg('muted', this.details.warning)}`,
+        ),
+      )
+      return
+    }
 
     if (!this.result) {
       if (this.details?.phase === 'preparing') {
