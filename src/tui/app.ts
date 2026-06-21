@@ -112,6 +112,7 @@ export class App {
   private compacting = false
   private compactionProgressText?: Text
   private permissionPromptActive = false
+  private pendingEventsWhilePermission: Array<() => void> = []
   private isBashMode = false
   private bashComponent?: BashExecutionComponent
   private startupWarnings: string[] = []
@@ -2040,6 +2041,7 @@ export class App {
           this.chatContainer.addChild(new Spacer(1))
           this.ui.setFocus(this.editor)
           this.ui.requestRender()
+          this.flushPendingEventsWhilePermission()
           resolve(undefined)
           return { consume: true }
         }
@@ -2052,6 +2054,7 @@ export class App {
         removeListener()
         this.permissionPromptActive = false
         this.chatContainer.removeChild(selectList)
+        this.flushPendingEventsWhilePermission()
 
         if (value === '__other__') {
           // Show "Other" prompt — let user type free-text
@@ -2136,6 +2139,7 @@ export class App {
           removeListener()
           this.permissionPromptActive = false
           this.chatContainer.removeChild(selectList)
+          this.flushPendingEventsWhilePermission()
           this.exit()
           return { consume: true }
         }
@@ -2148,6 +2152,7 @@ export class App {
         removeListener()
         this.permissionPromptActive = false
         this.chatContainer.removeChild(selectList)
+        this.flushPendingEventsWhilePermission()
         const icon = approved ? theme.fg('green', '✓') : theme.fg('red', '✗')
         const resultText = approved ? 'Approved' : 'Denied'
         this.chatContainer.addChild(new Text(`${icon} ${resultText}`, 1, 0))
@@ -2304,8 +2309,9 @@ export class App {
 
   private setupAgentSubscription(): void {
     this.agent.subscribe((event: MicrocodeAgentEvent) => {
-      switch (event.type) {
-        case 'compaction_changed':
+      const process = () => {
+        switch (event.type) {
+          case 'compaction_changed':
           this.updateCompactionProgress(event.progress)
           break
 
@@ -2469,13 +2475,28 @@ export class App {
           }
           this.ui.requestRender()
           break
+        }
+      }
+      if (this.permissionPromptActive) {
+        this.pendingEventsWhilePermission.push(() => process())
+      } else {
+        process()
       }
     })
+  }
+
+  private flushPendingEventsWhilePermission(): void {
+    const queue = this.pendingEventsWhilePermission
+    this.pendingEventsWhilePermission = []
+    for (const replay of queue) {
+      replay()
+    }
   }
 
   private setupSwarmSubscription(): void {
     if (!this.supervisor) return
     this.supervisor.subscribe((event: SwarmUIEvent) => {
+      const process = () => {
       const task = event.task
       if (event.type === 'agent_spawned') {
         this.chatContainer.addChild(
@@ -2513,6 +2534,12 @@ export class App {
       this.updateAgentStatusLine()
       this.footer.invalidate()
       this.ui.requestRender()
+      }
+      if (this.permissionPromptActive) {
+        this.pendingEventsWhilePermission.push(() => process())
+      } else {
+        process()
+      }
     })
     this.updateAgentStatusLine()
   }

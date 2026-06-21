@@ -477,8 +477,12 @@ Session Management:
     )
   }
 
-  // Wire permission prompt to TUI
+  // Wire permission prompt to TUI (own tool calls)
   agent.setPermissionRequestHandler(
+    (toolName, input, description) => app.promptPermission(toolName, input, description),
+  )
+  // Wire delegated permission prompt to TUI (worker tool calls)
+  agent.setDelegatePermissionRequestHandler(
     (toolName, input, description) => app.promptPermission(toolName, input, description),
   )
 
