@@ -190,6 +190,22 @@ export class PermissionManager {
   }
 
   /**
+   * Replace all rules from a parent snapshot (permission inheritance).
+   * Worker-specific deny rules are merged in on top.
+   */
+  inheritFrom(snapshot: PermissionSnapshot, extraDeny: PermissionRuleValue[] = [], updateMode = true): void {
+    this.context.allowRules = snapshot.allowRules.map((r) => ({ ...r }))
+    this.context.denyRules = [
+      ...snapshot.denyRules.map((r) => ({ ...r })),
+      ...extraDeny.map((v) => ({ ...v, behavior: 'deny' as const, source: 'session' as const })),
+    ]
+    this.context.askRules = snapshot.askRules.map((r) => ({ ...r }))
+    if (updateMode) {
+      this.context.mode = snapshot.mode
+    }
+  }
+
+  /**
    * Core permission check — returns a decision.
    */
   checkPermission(

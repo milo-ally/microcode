@@ -123,7 +123,7 @@ describe('AgentSupervisor', () => {
     const notifications = parent.getMessages().filter(
       (message) => message.role === 'user' &&
         typeof message.content === 'string' &&
-        message.content.includes('<agent-results>') &&
+        message.content.includes('<agent-results') &&
         message.content.includes(`<task-id>${task.id}</task-id>`),
     )
     expect(notifications).toHaveLength(1)

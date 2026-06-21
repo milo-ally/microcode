@@ -86,6 +86,7 @@ export class AgentSupervisor {
   private readonly delivered = new Set<string>()
   private readonly queuedPrompts = new Map<string, string>()
   private readonly pendingNotifications: Readonly<AgentTask>[] = []
+  private readonly accumulatedResults: Readonly<AgentTask>[] = []
   private notifyTimer: ReturnType<typeof setTimeout> | null = null
   private readonly notifyDebounceMs: number
   private shuttingDown = false
@@ -146,6 +147,18 @@ export class AgentSupervisor {
   subscribe(listener: SwarmUIEventListener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** Push parent permission rules (and optionally mode) to all worker agents. */
+  syncPermissionsToWorkers(updateMode = false): void {
+    const snapshot = this.coordinator.getPermissionSnapshot()
+    for (const agent of this.registry.list()) {
+      if (agent.getId() === this.coordinator.getId()) continue
+      // Read-only workers stay in plan mode regardless of parent
+      const task = this.tasks.getByAgent(agent.getId())
+      const isReadOnly = task?.workKind === 'read'
+      agent.inheritPermissions(snapshot, [], updateMode && !isReadOnly)
+    }
   }
 
   getMaxWorkers(): number {
@@ -439,13 +452,24 @@ export class AgentSupervisor {
   private flushNotifications(): void {
     const batch = this.pendingNotifications.splice(0)
     if (batch.length === 0) return
-    const results = batch.map((task) => {
+    this.accumulatedResults.push(...batch)
+
+    const remaining = this.tasks.list().filter((t) =>
+      t.status === 'queued' || t.status === 'running' || t.status === 'waiting_permission',
+    ).length
+
+    // Hold all results until every agent completes, so the coordinator
+    // sees a single batch and responds once. On shutdown, flush regardless.
+    if (remaining > 0 && !this.shuttingDown) return
+
+    const allResults = this.accumulatedResults.splice(0)
+    const results = allResults.map((task) => {
       const result = task.result ? `\n  <result>${task.result}</result>` : ''
       const error = task.error ? `\n  <error>${task.error}</error>` : ''
       return `  <agent-result>\n    <task-id>${task.id}</task-id>\n    <agent-id>${task.agentId}</agent-id>\n    <status>${task.status}</status>${result}${error}\n    <usage tokens="${task.usage.tokens}" tool-calls="${task.usage.toolCalls}" />\n  </agent-result>`
     }).join('\n')
     const notification = this.userMessage(
-      `<agent-results>\n${results}\n</agent-results>`,
+      `<agent-results remaining="${remaining}">\n${results}\n</agent-results>`,
     )
     if (this.coordinator.isBusy()) {
       this.coordinator.followUp(notification)

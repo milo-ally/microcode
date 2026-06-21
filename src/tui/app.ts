@@ -1703,6 +1703,7 @@ export class App {
 
         if (selectedMode) {
           this.agent.setPermissionMode(selectedMode)
+          this.supervisor?.syncPermissionsToWorkers(true)
           this.showStatus(`Permission mode set to: ${selectedMode}`)
         }
 
@@ -2177,6 +2178,7 @@ export class App {
       selectList.onSelect = (item) => {
         if (item.value === 'allow-session') {
           this.agent.addSessionPermission(toolName, ruleContent)
+          this.supervisor?.syncPermissionsToWorkers()
         }
         finish(item.value === 'allow' || item.value === 'allow-session')
       }

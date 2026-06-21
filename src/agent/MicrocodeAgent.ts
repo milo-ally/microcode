@@ -488,6 +488,15 @@ export class MicrocodeAgent {
     this.emitStateChangedDetached('permission_changed')
   }
 
+  /** Replace all rules from a parent snapshot (permission inheritance). */
+  inheritPermissions(
+    snapshot: Readonly<PermissionSnapshot>,
+    extraDeny: PermissionRuleValue[] = [],
+    updateMode = true,
+  ): void {
+    this.permissionManager.inheritFrom(snapshot, extraDeny, updateMode)
+  }
+
   setPermissionRequestHandler(
     handler: Parameters<PermissionManager['setOnPermissionRequest']>[0],
   ): void {

@@ -2,7 +2,11 @@ import { createMicrocodeAgentRuntime, type MicrocodeAgent } from '../agent/index
 import { getWorkerPrompt } from './prompts.ts'
 import type { AgentFactoryContext } from './types.ts'
 
-const READ_ONLY_DENY = ['bash', 'file_edit', 'file_write']
+const READ_ONLY_DENY = [
+  { toolName: 'bash' },
+  { toolName: 'file_edit' },
+  { toolName: 'file_write' },
+]
 
 export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent {
   const { parent, request, agentId } = context
@@ -14,25 +18,6 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
     : parentMode === 'interactive' && requestedMode === 'auto-approve'
       ? 'interactive'
       : requestedMode
-  const parentDeny = parent.getPermissionSnapshot().denyRules.map((rule) =>
-    rule.ruleContent
-      ? `${rule.toolName}(${rule.ruleContent})`
-      : rule.toolName
-  )
-  const delegate = (
-    toolName: string,
-    input: Record<string, unknown>,
-    description: string,
-  ) => {
-    const decision = parent.checkPermission(toolName, input)
-    if (decision.allowed) return Promise.resolve(true)
-    if (decision.reason !== 'ask') return Promise.resolve(false)
-    return parent.requestDelegatedPermission(
-      toolName,
-      input,
-      `[Worker: ${request.description}] ${description}`,
-    )
-  }
 
   const worker = createMicrocodeAgentRuntime({
     cwd: request.cwd ?? parentSnapshot.cwd,
@@ -46,19 +31,23 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
     },
     permission: {
       mode,
-      deny: [
-        ...parentDeny,
-        ...(request.workKind === 'read' ? READ_ONLY_DENY : []),
-      ],
-      nonInteractiveStrategy: 'delegate-to-parent',
-      onPermissionRequest: delegate,
-      onDelegatePermissionRequest: delegate,
+      deny: request.workKind === 'read'
+        ? READ_ONLY_DENY.map((r) => r.toolName)
+        : [],
     },
     systemPromptSuffix: getWorkerPrompt(
       request.parentAgentId,
       request.description,
     ),
   })
+
+  // Inherit all permission rules from parent (allow, deny, ask)
+  // Mode is NOT inherited — worker mode is set above based on workKind
+  worker.inheritPermissions(
+    parent.getPermissionSnapshot(),
+    request.workKind === 'read' ? READ_ONLY_DENY : [],
+    false,
+  )
 
   for (const skillName of parent.getLoadedSkillNames()) {
     if (worker.getSkills().some((skill) => skill.name === skillName)) {
