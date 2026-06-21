@@ -134,7 +134,20 @@ Add MCP servers to `~/.microcode/config.json` (user-level) or `.microcode/config
 - `/thinking` — Show or set thinking depth
 - `/permission` — Show or switch permission mode
 - `/skills` — List available skills
+- `/agents` — Browse delegated agents, results, and transcripts
+- `/agent-message <agent-id> <message>` — Continue an existing agent
 - `/help` — Show available commands
+
+## Multi-Agent
+
+The coordinator can launch asynchronous workers for research, implementation,
+and verification. Read-only workers can run in parallel; write workers are
+serialized to protect the shared workspace.
+
+- Press `Ctrl+A` to open the agent browser.
+- In the browser, press `Enter` for details, `S` to stop, or `M` to message.
+- `MICROCODE_MAX_WORKERS` sets the worker concurrency limit (default: `4`).
+- `MICROCODE_AGENT_TIMEOUT_MS` sets the per-run timeout (default: `1800000`).
 
 ## Skills
 

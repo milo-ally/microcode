@@ -84,6 +84,7 @@ export class MicrocodeAgent {
   private readonly modelManager: AgentModelManager
   private readonly toolManager: AgentToolManager
   private readonly skillManager: AgentSkillManager
+  private readonly systemPromptSuffix?: string
   private baseSystemPrompt: string
   private mcpServers?: McpServerState[]
   private persistence?: AgentSessionPersistence
@@ -96,6 +97,7 @@ export class MicrocodeAgent {
   constructor(options: CreateMicrocodeAgentOptions = {}) {
     this.cwd = options.cwd ?? process.cwd()
     this.persistence = options.persistence
+    this.systemPromptSuffix = options.systemPromptSuffix
     this.identity = normalizeIdentity(options)
     this.permissionRequestHandler = options.permission?.onPermissionRequest
     this.askUserQuestionHandler = options.permission?.onAskUserQuestion
@@ -149,7 +151,9 @@ export class MicrocodeAgent {
       deferredToolNames: deferredToolNames.length > 0 ? deferredToolNames : undefined,
     }).join('\n\n')
 
-    this.baseSystemPrompt = systemPrompt
+    this.baseSystemPrompt = this.systemPromptSuffix
+      ? `${systemPrompt}\n\n${this.systemPromptSuffix}`
+      : systemPrompt
     this.compactionManager = new CompactionManager({
       model: modelConfig.model,
       apiKey: modelConfig.apiKey,
@@ -164,11 +168,11 @@ export class MicrocodeAgent {
       generateSummaryFn: options.generateSummaryFn,
       settings: options.compactionSettings,
     })
-    this.compactionManager.setSystemPrompt(systemPrompt)
+    this.compactionManager.setSystemPrompt(this.baseSystemPrompt)
 
     this.core = new Agent({
       initialState: {
-        systemPrompt,
+        systemPrompt: this.baseSystemPrompt,
         model: modelConfig.model,
         tools: this.toolManager.getTools(),
       },
@@ -331,6 +335,18 @@ export class MicrocodeAgent {
 
   abort(): void {
     this.core.abort()
+  }
+
+  followUp(message: AgentMessage): void {
+    this.core.followUp(message)
+  }
+
+  steer(message: AgentMessage): void {
+    this.core.steer(message)
+  }
+
+  waitForIdle(): Promise<void> {
+    return this.core.waitForIdle()
   }
 
   subscribe(listener: MicrocodeAgentEventListener): () => void {
@@ -637,13 +653,16 @@ export class MicrocodeAgent {
 
   private buildBaseSystemPrompt(model: Model<Api>): string {
     const deferredToolNames = getDeferredToolNames()
-    return getSystemPrompt({
+    const prompt = getSystemPrompt({
       cwd: this.cwd,
       modelId: model.id,
       mcpServers: this.mcpServers,
       skills: [...this.skillManager.getSkills()],
       deferredToolNames: deferredToolNames.length > 0 ? deferredToolNames : undefined,
     }).join('\n\n')
+    return this.systemPromptSuffix
+      ? `${prompt}\n\n${this.systemPromptSuffix}`
+      : prompt
   }
 
   private appendLoadedSkills(basePrompt: string): string {

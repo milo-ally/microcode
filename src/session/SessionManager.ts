@@ -1,6 +1,7 @@
 import * as path from 'path'
 import * as os from 'os'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { mkdir, readFile, rename, writeFile } from 'fs/promises'
 import {
   JsonlSessionRepo,
   Session,
@@ -19,10 +20,12 @@ import {
   type TaskMarkUpdate,
   type TaskReminderUpdate,
 } from '../tasks/TaskSystem.ts'
+import type { AgentTask } from '../swarm/types.ts'
 
 const SESSIONS_DIR = path.join(os.homedir(), '.microcode', 'sessions')
 const TITLES_FILE = path.join(SESSIONS_DIR, '.titles.json')
 const TASKS_DIR = path.join(SESSIONS_DIR, '.tasks')
+const AGENTS_DIR = path.join(SESSIONS_DIR, '.agents')
 
 export interface SessionListItem extends JsonlSessionMetadata {
   title?: string
@@ -39,14 +42,16 @@ export class SessionManager implements AgentSessionPersistence {
   private savedMessageCount = 0
   private titleCache: Map<string, string> | null = null
   private readonly taskSystem: TaskSystem
+  private readonly agentsRoot: string
 
-  constructor(options: { tasksRoot?: string } = {}) {
+  constructor(options: { tasksRoot?: string; agentsRoot?: string } = {}) {
     const fs = new NodeFileSystem('/')
     this.repo = new JsonlSessionRepo({
       fs,
       sessionsRoot: SESSIONS_DIR,
     })
     this.taskSystem = new TaskSystem(options.tasksRoot ?? TASKS_DIR)
+    this.agentsRoot = options.agentsRoot ?? AGENTS_DIR
   }
 
   /**
@@ -205,6 +210,73 @@ export class SessionManager implements AgentSessionPersistence {
     const sessionId = this.getSessionId()
     if (!sessionId) throw new Error('No active session.')
     return sessionId
+  }
+
+  async saveAgentManifest(tasks: readonly AgentTask[]): Promise<void> {
+    const dir = this.getAgentSessionDir()
+    await mkdir(dir, { recursive: true })
+    await this.atomicWrite(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({ version: 1, tasks }, null, 2),
+    )
+  }
+
+  async loadAgentManifest(): Promise<AgentTask[]> {
+    const file = path.join(this.getAgentSessionDir(), 'manifest.json')
+    try {
+      const parsed = JSON.parse(await readFile(file, 'utf8')) as {
+        version?: number
+        tasks?: AgentTask[]
+      }
+      return Array.isArray(parsed.tasks) ? parsed.tasks : []
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    }
+  }
+
+  async saveAgentTranscript(
+    agentId: string,
+    messages: readonly AgentMessage[],
+  ): Promise<void> {
+    if (!/^[a-zA-Z0-9._-]+$/.test(agentId)) {
+      throw new Error('Invalid agent ID.')
+    }
+    const dir = path.join(this.getAgentSessionDir(), 'agents')
+    await mkdir(dir, { recursive: true })
+    const serialized = messages
+      .map((message) => JSON.stringify(replaceImageBlocksForPersistence(message)))
+      .join('\n')
+    await this.atomicWrite(
+      path.join(dir, `${agentId}.jsonl`),
+      serialized ? `${serialized}\n` : '',
+    )
+  }
+
+  async loadAgentTranscript(agentId: string): Promise<AgentMessage[]> {
+    if (!/^[a-zA-Z0-9._-]+$/.test(agentId)) {
+      throw new Error('Invalid agent ID.')
+    }
+    try {
+      const raw = await readFile(
+        path.join(this.getAgentSessionDir(), 'agents', `${agentId}.jsonl`),
+        'utf8',
+      )
+      return raw.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    }
+  }
+
+  private getAgentSessionDir(): string {
+    return path.join(this.agentsRoot, this.requireSessionId())
+  }
+
+  private async atomicWrite(file: string, content: string): Promise<void> {
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`
+    await writeFile(temp, content, 'utf8')
+    await rename(temp, file)
   }
 
   /**

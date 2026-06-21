@@ -36,6 +36,7 @@ export class FooterComponent implements Component {
   constructor(
     private readonly agent: MicrocodeAgent,
     private readonly cwd: string,
+    private readonly getAgentStats?: () => { running: number; max: number },
   ) {
     this.gitBranch = getGitBranch(cwd)
   }
@@ -73,6 +74,10 @@ export class FooterComponent implements Component {
     statsParts.push(
       chalk.hex(getContextColor(contextUsage.percentUsed))(`ctx:${contextUsage.percentUsed}%`),
     )
+    const agentStats = this.getAgentStats?.()
+    if (agentStats) {
+      statsParts.push(`agents:${agentStats.running}/${agentStats.max}`)
+    }
 
     const statsLeft = chalk.hex('#666666')(`${pwd}  `) +
       statsParts.join(chalk.hex('#666666')(' '))

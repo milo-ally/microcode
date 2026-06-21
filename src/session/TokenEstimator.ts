@@ -39,16 +39,12 @@ export function estimateTokens(message: AgentMessage): number {
       return Math.ceil(chars / 4)
     }
     case 'toolResult': {
-      if (typeof message.content === 'string') {
-        chars = message.content.length
-      } else {
-        for (const block of message.content) {
-          if (block.type === 'text' && block.text) {
-            chars += block.text.length
-          }
-          if (block.type === 'image') {
-            chars += IMAGE_TOKEN_ESTIMATE * 4
-          }
+      for (const block of message.content) {
+        if (block.type === 'text' && block.text) {
+          chars += block.text.length
+        }
+        if (block.type === 'image') {
+          chars += IMAGE_TOKEN_ESTIMATE * 4
         }
       }
       return Math.ceil(chars / 4)

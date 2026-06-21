@@ -67,6 +67,7 @@ export interface CreateMicrocodeAgentOptions {
   generateSummaryFn?: typeof generateSummary
   compactionSettings?: Partial<CompactionSettings>
   streamFn?: StreamFn
+  systemPromptSuffix?: string
 }
 
 export interface CompactAgentOptions {
@@ -186,6 +187,9 @@ export interface MicrocodeAgentHandle {
   getIdentity(): Readonly<AgentIdentity>
   getSnapshot(): Readonly<MicrocodeAgentSnapshot>
   subscribe(listener: MicrocodeAgentEventListener): () => void
+  followUp(message: AgentMessage): void
+  steer(message: AgentMessage): void
+  waitForIdle(): Promise<void>
 }
 
 /** Storage contract that a future AgentRegistry can implement. */

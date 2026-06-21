@@ -32,6 +32,10 @@ export { createGrepTool, TOOL_NAME as GREP_TOOL_NAME, TOOL_DEFAULT_PERMISSION as
 export { createGlobTool, TOOL_NAME as GLOB_TOOL_NAME, TOOL_DEFAULT_PERMISSION as GLOB_DEFAULT_PERMISSION } from './GlobTool/GlobTool.ts'
 export { createVisionTool, TOOL_NAME as VISION_TOOL_NAME, TOOL_DEFAULT_PERMISSION as VISION_DEFAULT_PERMISSION } from './VisionTool/VisionTool.ts'
 export { createTaskTool, TOOL_NAME as TASK_TOOL_NAME, TOOL_DEFAULT_PERMISSION as TASK_DEFAULT_PERMISSION } from './TaskTool/TaskTool.ts'
+export { createSpawnAgentTool, TOOL_NAME as SPAWN_AGENT_TOOL_NAME, TOOL_DEFAULT_PERMISSION as SPAWN_AGENT_DEFAULT_PERMISSION } from './SpawnAgentTool/SpawnAgentTool.ts'
+export { createSendAgentMessageTool, TOOL_NAME as SEND_AGENT_MESSAGE_TOOL_NAME, TOOL_DEFAULT_PERMISSION as SEND_AGENT_MESSAGE_DEFAULT_PERMISSION } from './SendAgentMessageTool/SendAgentMessageTool.ts'
+export { createStopAgentTool, TOOL_NAME as STOP_AGENT_TOOL_NAME, TOOL_DEFAULT_PERMISSION as STOP_AGENT_DEFAULT_PERMISSION } from './StopAgentTool/StopAgentTool.ts'
+export { createGetAgentStatusTool, TOOL_NAME as GET_AGENT_STATUS_TOOL_NAME, TOOL_DEFAULT_PERMISSION as GET_AGENT_STATUS_DEFAULT_PERMISSION } from './GetAgentStatusTool/GetAgentStatusTool.ts'
 
 /** Get the names of all deferred tool definitions (for system prompt listing). */
 export function getDeferredToolNames(): string[] {

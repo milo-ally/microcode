@@ -1,0 +1,239 @@
+import { beforeAll, describe, expect, test } from 'bun:test'
+import type { AgentMessage } from '@earendil-works/pi-agent-core'
+import {
+  createAssistantMessageEventStream,
+  type AssistantMessage,
+  type AssistantMessageEventStream,
+} from '@earendil-works/pi-ai'
+import {
+  createMicrocodeAgentRuntime,
+  type MicrocodeAgent,
+} from '../../src/agent/index.ts'
+import { ensureBootstrapMacro } from '../../src/macro.ts'
+import {
+  AgentSupervisor,
+  type AgentTask,
+  type AgentTranscriptPersistence,
+} from '../../src/swarm/index.ts'
+
+beforeAll(() => ensureBootstrapMacro())
+
+function response(text: string, stopReason: 'stop' | 'aborted' = 'stop'): AssistantMessage {
+  return {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    api: 'openai-completions',
+    provider: 'test',
+    model: 'test',
+    usage: {
+      input: 2,
+      output: 3,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 5,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason,
+    timestamp: Date.now(),
+  }
+}
+
+function completedStream(text: string): AssistantMessageEventStream {
+  const stream = createAssistantMessageEventStream()
+  queueMicrotask(() => {
+    const message = response(text)
+    stream.push({ type: 'start', partial: message })
+    stream.push({ type: 'done', reason: 'stop', message })
+  })
+  return stream
+}
+
+function coordinator(): MicrocodeAgent {
+  return createMicrocodeAgentRuntime({
+    identity: { id: 'coordinator', role: 'coordinator' },
+    streamFn: () => completedStream('coordinator handled result'),
+  })
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 1000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('Timed out waiting for condition')
+    await Bun.sleep(5)
+  }
+}
+
+class MemoryAgentPersistence implements AgentTranscriptPersistence {
+  manifests: AgentTask[][] = []
+  transcripts = new Map<string, readonly AgentMessage[]>()
+
+  async saveAgentManifest(tasks: readonly AgentTask[]): Promise<void> {
+    this.manifests.push(tasks.map((task) => ({
+      ...task,
+      usage: { ...task.usage },
+    })))
+  }
+
+  async loadAgentManifest(): Promise<AgentTask[]> {
+    return this.manifests.at(-1) ?? []
+  }
+
+  async saveAgentTranscript(
+    agentId: string,
+    messages: readonly AgentMessage[],
+  ): Promise<void> {
+    this.transcripts.set(agentId, [...messages])
+  }
+}
+
+describe('AgentSupervisor', () => {
+  test('completes a worker, persists it, and notifies the coordinator once', async () => {
+    const parent = coordinator()
+    const persistence = new MemoryAgentPersistence()
+    const supervisor = new AgentSupervisor({
+      coordinator: parent,
+      persistence,
+      createWorker: ({ agentId, request }) => createMicrocodeAgentRuntime({
+        identity: {
+          id: agentId,
+          parentId: request.parentAgentId,
+          role: 'worker',
+        },
+        streamFn: () => completedStream('worker result'),
+      }),
+    })
+    const task = await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'Research',
+      prompt: 'Research the issue',
+    })
+    await waitFor(() => supervisor.getTask(task.id)?.status === 'completed')
+    await parent.waitForIdle()
+
+    expect(supervisor.getTask(task.id)).toMatchObject({
+      status: 'completed',
+      result: 'worker result',
+      usage: { tokens: 5 },
+    })
+    expect(persistence.transcripts.has(task.agentId)).toBe(true)
+    const notifications = parent.getMessages().filter(
+      (message) => message.role === 'user' &&
+        typeof message.content === 'string' &&
+        message.content.includes(`<task-id>${task.id}</task-id>`),
+    )
+    expect(notifications).toHaveLength(1)
+    await supervisor.shutdown()
+  })
+
+  test('enforces max concurrency and one running writer', async () => {
+    const parent = coordinator()
+    const streams: AssistantMessageEventStream[] = []
+    const supervisor = new AgentSupervisor({
+      coordinator: parent,
+      maxWorkers: 3,
+      createWorker: ({ agentId, request }) => createMicrocodeAgentRuntime({
+        identity: { id: agentId, parentId: request.parentAgentId },
+        streamFn: () => {
+          const stream = createAssistantMessageEventStream()
+          streams.push(stream)
+          return stream
+        },
+      }),
+    })
+    const first = await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'Writer one',
+      prompt: 'write one',
+      workKind: 'write',
+    })
+    const second = await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'Writer two',
+      prompt: 'write two',
+      workKind: 'write',
+    })
+    const reader = await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'Reader',
+      prompt: 'read',
+      workKind: 'read',
+    })
+    await waitFor(() => streams.length === 2)
+    expect(supervisor.getTask(first.id)?.status).toBe('running')
+    expect(supervisor.getTask(second.id)?.status).toBe('queued')
+    expect(supervisor.getTask(reader.id)?.status).toBe('running')
+
+    const done = response('done')
+    streams[0]!.push({ type: 'start', partial: done })
+    streams[0]!.push({ type: 'done', reason: 'stop', message: done })
+    await waitFor(() => supervisor.getTask(second.id)?.status === 'running')
+    expect(supervisor.getRunningCount()).toBeLessThanOrEqual(3)
+
+    for (const stream of streams.slice(1)) {
+      stream.push({ type: 'start', partial: done })
+      stream.push({ type: 'done', reason: 'stop', message: done })
+    }
+    await waitFor(() => supervisor.getTask(second.id)?.status === 'completed')
+    await supervisor.shutdown()
+  })
+
+  test('rejects recursive spawning and marks restored work interrupted', async () => {
+    const persistence = new MemoryAgentPersistence()
+    persistence.manifests.push([{
+      id: 'old-task',
+      agentId: 'old-agent',
+      parentAgentId: 'coordinator',
+      description: 'Old work',
+      prompt: 'old',
+      role: 'worker',
+      workKind: 'read',
+      status: 'running',
+      createdAt: 1,
+      usage: { tokens: 0, toolCalls: 0 },
+    }])
+    const parent = coordinator()
+    const supervisor = new AgentSupervisor({
+      coordinator: parent,
+      persistence,
+    })
+    await supervisor.restore()
+    expect(supervisor.getTask('old-task')?.status).toBe('interrupted')
+    await expect(supervisor.spawn({
+      parentAgentId: 'some-worker',
+      description: 'Nested',
+      prompt: 'nested',
+    })).rejects.toThrow('Workers cannot create child agents')
+    await supervisor.shutdown()
+  })
+
+  test('times out and aborts a worker', async () => {
+    const parent = coordinator()
+    const supervisor = new AgentSupervisor({
+      coordinator: parent,
+      timeoutMs: 20,
+      createWorker: ({ agentId, request }) => createMicrocodeAgentRuntime({
+        identity: { id: agentId, parentId: request.parentAgentId },
+        streamFn: (_model, _context, options) => {
+          const stream = createAssistantMessageEventStream()
+          options.signal?.addEventListener('abort', () => {
+            const aborted = response('aborted', 'aborted')
+            stream.push({ type: 'start', partial: aborted })
+            stream.push({ type: 'done', reason: 'aborted', message: aborted })
+          }, { once: true })
+          return stream
+        },
+      }),
+    })
+    const task = await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'Slow task',
+      prompt: 'wait forever',
+    })
+    await waitFor(() => supervisor.getTask(task.id)?.status === 'failed')
+    expect(supervisor.getTask(task.id)?.error).toContain('Timed out')
+    await supervisor.shutdown()
+  })
+})

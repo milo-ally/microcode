@@ -1,5 +1,8 @@
-import { diffLines, structuredPatch, type ParsedDiff, type Hunk } from 'diff'
+import { diffLines, structuredPatch } from 'diff'
 import chalk from 'chalk'
+
+type ParsedDiff = ReturnType<typeof structuredPatch>
+type Hunk = ParsedDiff['hunks'][number]
 
 export interface DiffResult {
   patch: ParsedDiff

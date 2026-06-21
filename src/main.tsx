@@ -7,11 +7,26 @@ import { loadMcpConfig, isMcpConfigEmpty } from './mcp/config.ts'
 import { addMcpServer, removeMcpServer, listMcpServers, parseEnvVars, parseHeaders, type ConfigScope } from './mcp/configWrite.ts'
 import type { McpServerConfig } from './mcp/types.ts'
 import { SessionManager } from './session/SessionManager.ts'
+import {
+  AgentSupervisor,
+  COORDINATOR_PROMPT,
+} from './swarm/index.ts'
+import {
+  createSpawnAgentTool,
+  createSendAgentMessageTool,
+  createStopAgentTool,
+  createGetAgentStatusTool,
+} from './tools/index.ts'
 import { type PermissionMode, PERMISSION_MODES } from './permissions/index.ts'
 import { cleanupImageCache } from './utils/imageUtils.ts'
 
 declare const MACRO: {
   VERSION: string
+}
+
+function positiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
 }
 
 function parseFlag(args: string[], flag: string): string | undefined {
@@ -143,14 +158,16 @@ async function handleMcpList(args: string[]): Promise<void> {
     console.log('Configured MCP servers:\n')
     for (const { scope: s, name, config } of servers) {
       let typeDesc: string
-      if (config.type === 'sse') {
+      if ('command' in config) {
+        typeDesc = `stdio → ${config.command} ${(config.args ?? []).join(' ')}`.trim()
+      } else if (config.type === 'sse') {
         typeDesc = `sse → ${config.url}`
-      } else if (config.type === 'http') {
-        typeDesc = `http → ${config.url}`
+      } else if (config.type === 'http' || config.type === 'streamableHttp') {
+        typeDesc = `${config.type} → ${config.url}`
       } else if (config.type === 'ws') {
         typeDesc = `ws → ${config.url}`
       } else {
-        typeDesc = `stdio → ${config.command} ${(config.args ?? []).join(' ')}`.trim()
+        typeDesc = 'unknown transport'
       }
       console.log(`  ${name} [${s}]`)
       console.log(`    ${typeDesc}`)
@@ -405,14 +422,48 @@ Session Management:
     thinkingLevel,
     permission: { mode: permissionMode },
     persistence: sessionManager,
+    identity: {
+      id: `coordinator-${sessionManager.getSessionId() ?? 'session'}`,
+      name: 'Coordinator',
+      role: 'coordinator',
+    },
+    systemPromptSuffix: COORDINATOR_PROMPT,
   })
   // Restore messages if resuming
   if (restoredMessages && restoredMessages.length > 0) {
     agent.replaceMessages(restoredMessages, 'rebuild')
   }
 
+  const supervisor = new AgentSupervisor({
+    coordinator: agent,
+    persistence: sessionManager,
+    maxWorkers: positiveInt(process.env.MICROCODE_MAX_WORKERS, 4),
+    timeoutMs: positiveInt(
+      process.env.MICROCODE_AGENT_TIMEOUT_MS,
+      30 * 60 * 1000,
+    ),
+    configureWorker: (worker) => {
+      if (mcpClient.getConnectedServers().length > 0) {
+        worker.configureMcpTools(mcpClient)
+        worker.updateMcpServers(mcpClient.getServerStates())
+      }
+    },
+  })
+  await supervisor.restore()
+  const coordinatorId = agent.getId()
+  agent.addTools([
+    createSpawnAgentTool(supervisor, coordinatorId),
+    createSendAgentMessageTool(supervisor, coordinatorId),
+    createStopAgentTool(supervisor, coordinatorId),
+    createGetAgentStatusTool(supervisor, coordinatorId),
+  ])
+  agent.addSessionPermission('spawn_agent')
+  agent.addSessionPermission('send_agent_message')
+  agent.addSessionPermission('stop_agent')
+  agent.addSessionPermission('get_agent_status')
+
   // Create TUI app (REPL starts immediately)
-  const app = new App(agent, mcpClient, sessionManager)
+  const app = new App(agent, mcpClient, sessionManager, supervisor)
 
   // Warn if no API key is configured (non-blocking — app still starts)
   if (!agent.getApiKey()) {
@@ -438,6 +489,7 @@ Session Management:
 
   // Handle exit from TUI (Ctrl+C, Ctrl+D, Escape)
   app.onExit = async () => {
+    await supervisor.shutdown()
     try {
       await agent.persistMessages()
     } catch {
@@ -456,7 +508,10 @@ Session Management:
   const mcpConfigs = await loadMcpConfig(cwd)
   if (!isMcpConfigEmpty(mcpConfigs)) {
     void mcpClient.connectAll(mcpConfigs).then(() => {
-      agent.configureMcpTools(mcpClient)
+      for (const runtime of supervisor.registry.list()) {
+        runtime.configureMcpTools(mcpClient)
+        runtime.updateMcpServers(mcpClient.getServerStates())
+      }
 
       // Rebuild system prompt with MCP info and deferred tool names
       app.updateMcpState(mcpClient)
@@ -468,6 +523,7 @@ Session Management:
 
   // Handle graceful shutdown
   const shutdown = async () => {
+    await supervisor.shutdown()
     // Save session before exit
     try {
       await agent.persistMessages()

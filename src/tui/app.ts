@@ -50,6 +50,11 @@ import type { Skill } from '../skill/skill.ts'
 import { type PermissionMode, PERMISSION_MODES } from '../permissions/index.ts'
 import type { TaskList } from '../tasks/TaskSystem.ts'
 import { MultiSelectList, type MultiSelectItem } from './components/multiSelectList.ts'
+import { AgentPanel } from './components/agentPanel.ts'
+import type {
+  AgentSupervisor,
+  SwarmUIEvent,
+} from '../swarm/index.ts'
 
 declare const MACRO: {
   VERSION: string
@@ -75,6 +80,8 @@ const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   { name: 'mcp', description: 'Manage MCP servers (usage: /mcp [add|remove|enable|disable|reconnect] [args...])', argumentHint: '[action] [args...]' },
   { name: 'session', description: 'Browse and load saved sessions', argumentHint: '' },
   { name: 'tasks', description: 'Browse tasks and prioritize unfinished work in the current session', argumentHint: '' },
+  { name: 'agents', description: 'Browse delegated agents', argumentHint: '' },
+  { name: 'agent-message', description: 'Send a message to a delegated agent', argumentHint: '<agent-id> <message>' },
   { name: 'new', description: 'Start a new conversation session' },
   { name: 'permission', description: 'Show or switch permission mode (usage: /permission [mode])', argumentHint: '[mode]' },
   { name: 'skills', description: 'Show available skills' },
@@ -112,23 +119,36 @@ export class App {
   private imagePathProcessing = false
   private suppressTrailingQuote = false
   private titleGenerated = false
+  private supervisor?: AgentSupervisor
+  private agentStatusText?: Text
   onExit?: () => void | Promise<void>
 
   constructor(
     agent: MicrocodeAgent,
     mcpClient?: McpClientManager,
     sessionManager?: SessionManager,
+    supervisor?: AgentSupervisor,
   ) {
     this.agent = agent
     this.mcpClient = mcpClient
     this.sessionManager = sessionManager ?? new SessionManager()
+    this.supervisor = supervisor
     this.agent.setPersistence(this.sessionManager)
     this.ui = new TUI(new ProcessTerminal())
     this.headerContainer = new Container()
     this.chatContainer = new Container()
     this.statusContainer = new Container()
     this.editorContainer = new Container()
-    this.footer = new FooterComponent(agent, process.cwd())
+    this.footer = new FooterComponent(
+      agent,
+      process.cwd(),
+      supervisor
+        ? () => ({
+            running: supervisor.getRunningCount(),
+            max: supervisor.getMaxWorkers(),
+          })
+        : undefined,
+    )
   }
 
   getSessionManager(): SessionManager {
@@ -143,6 +163,7 @@ export class App {
   async run(): Promise<void> {
     this.init()
     this.setupAgentSubscription()
+    this.setupSwarmSubscription()
 
     // Show existing session title in footer (e.g., from --resume)
     const currentId = this.sessionManager.getSessionId()
@@ -356,6 +377,14 @@ export class App {
       this.exit()
     }
 
+    this.ui.addInputListener((data) => {
+      if (data === '\x01' && this.supervisor && !this.permissionPromptActive) {
+        this.handleAgentsCommand()
+        return { consume: true }
+      }
+      return undefined
+    })
+
     this.editorContainer.addChild(this.editor)
 
     // Assemble UI layout (matching pi-coding-agent order)
@@ -364,6 +393,16 @@ export class App {
     this.ui.addChild(this.statusContainer)
     this.ui.addChild(this.editorContainer)
     this.ui.addChild(this.footer)
+
+    if (this.supervisor) {
+      this.ui.showOverlay(new AgentPanel(this.supervisor), {
+        width: 36,
+        anchor: 'top-right',
+        margin: { top: 1, right: 1 },
+        nonCapturing: true,
+        visible: (terminalWidth) => terminalWidth >= 110,
+      })
+    }
 
     this.ui.setFocus(this.editor)
     this.ui.start()
@@ -506,6 +545,14 @@ export class App {
         this.handleTasksCommand()
         return true
 
+      case '/agents':
+        this.handleAgentsCommand()
+        return true
+
+      case '/agent-message':
+        this.handleAgentMessageCommand(args)
+        return true
+
       case '/permission':
         this.handlePermissionCommand(args)
         return true
@@ -542,6 +589,170 @@ export class App {
         this.showError(`Unknown command: ${command}. Type /help for available commands.`)
         return true
       }
+    }
+  }
+
+  private handleAgentMessageCommand(args: string): void {
+    if (!this.supervisor) {
+      this.showError('Multi-agent mode is unavailable.')
+      return
+    }
+    const firstSpace = args.indexOf(' ')
+    if (firstSpace === -1) {
+      this.showError('Usage: /agent-message <agent-id> <message>')
+      return
+    }
+    const agentId = args.slice(0, firstSpace).trim()
+    const message = args.slice(firstSpace + 1).trim()
+    if (!agentId || !message) {
+      this.showError('Usage: /agent-message <agent-id> <message>')
+      return
+    }
+    void this.supervisor.send(agentId, message).then(
+      () => this.showStatus(`Message sent to ${agentId}.`),
+      (error) => this.showError(
+        error instanceof Error ? error.message : String(error),
+      ),
+    )
+  }
+
+  private handleAgentsCommand(): void {
+    if (!this.supervisor) {
+      this.showError('Multi-agent mode is unavailable.')
+      return
+    }
+    const states = this.supervisor.listAgents()
+    if (states.length === 0) {
+      this.showStatus('No delegated agents.')
+      return
+    }
+    const items: SelectItem[] = states.map(({ task, activity }) => ({
+      value: task.agentId,
+      label: `${this.agentStatusIcon(task.status)} ${task.description}`,
+      description: `${task.status} · ${task.usage.tokens.toLocaleString()} tokens${activity ? ` · ${activity}` : ''}`,
+    }))
+    const selectList = new SelectList(items, Math.min(items.length, 10), {
+      selectedPrefix: (text) => chalk.cyan(text),
+      selectedText: (text) => chalk.cyan(text),
+      description: (text) => theme.dim(text),
+      scrollInfo: (text) => theme.dim(text),
+      noMatch: (text) => theme.dim(text),
+    })
+    this.chatContainer.addChild(
+      new Text(theme.fg('accent', 'Agents — Enter: details  S: stop  M: message'), 1, 0),
+    )
+    this.chatContainer.addChild(selectList)
+    this.ui.setFocus(selectList)
+    this.ui.requestRender()
+
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      removeListener()
+      this.chatContainer.removeChild(selectList)
+      this.chatContainer.addChild(new Spacer(1))
+      this.ui.setFocus(this.editor)
+      this.ui.requestRender()
+    }
+    let currentAgentId = items[0]?.value
+    selectList.onSelectionChange = (item) => {
+      currentAgentId = item.value
+    }
+    const removeListener = this.ui.addInputListener((data) => {
+      if (data.toLowerCase() !== 's' && data.toLowerCase() !== 'm') {
+        return undefined
+      }
+      const agentId = currentAgentId
+      if (!agentId) return undefined
+      if (data.toLowerCase() === 's') {
+        finish()
+        void this.supervisor!.stop(agentId).catch((error) =>
+          this.showError(error instanceof Error ? error.message : String(error))
+        )
+      } else {
+        finish()
+        this.editor.setText(`/agent-message ${agentId} `)
+      }
+      return { consume: true }
+    })
+
+    selectList.onSelect = (item) => {
+      finish()
+      void this.showAgentDetails(item.value)
+    }
+    selectList.onCancel = finish
+  }
+
+  private async showAgentDetails(agentId: string): Promise<void> {
+    if (!this.supervisor) return
+    const state = this.supervisor.listAgents().find(
+      (item) => item.task.agentId === agentId,
+    )
+    if (!state) {
+      this.showError(`Agent not found: ${agentId}`)
+      return
+    }
+    const { task, activity } = state
+    const duration = task.startedAt
+      ? Math.max(0, (task.completedAt ?? Date.now()) - task.startedAt)
+      : 0
+    const lines = [
+      theme.fg('accent', `${this.agentStatusIcon(task.status)} ${task.description}`),
+      `  Agent       ${task.agentId}`,
+      `  Status      ${task.status}`,
+      `  Role        ${task.role} (${task.workKind})`,
+      `  Duration    ${Math.round(duration / 1000)}s`,
+      `  Usage       ${task.usage.tokens.toLocaleString()} tokens · ${task.usage.toolCalls} tools`,
+      activity ? `  Activity    ${activity}` : '',
+      '',
+      theme.bold('Task'),
+      `  ${task.prompt}`,
+    ].filter(Boolean)
+    if (task.result) {
+      lines.push('', theme.bold('Result'), `  ${task.result}`)
+    }
+    if (task.error) {
+      lines.push('', theme.bold('Error'), `  ${task.error}`)
+    }
+    const liveTranscript = this.supervisor.registry.get(agentId)?.getMessages()
+    const transcript = liveTranscript && liveTranscript.length > 0
+      ? liveTranscript
+      : await this.sessionManager.loadAgentTranscript(agentId)
+    if (transcript.length > 0) {
+      lines.push('', theme.bold('Transcript'))
+      for (const message of transcript.slice(-12)) {
+        if (message.role === 'user') {
+          const content = typeof message.content === 'string'
+            ? message.content
+            : '[multimodal input]'
+          lines.push(`  coordinator: ${content}`)
+        } else if (message.role === 'assistant') {
+          const text = message.content
+            .filter((block) => block.type === 'text')
+            .map((block) => block.text)
+            .join(' ')
+          if (text) lines.push(`  worker: ${text}`)
+        } else if (message.role === 'toolResult') {
+          lines.push(`  tool: ${message.toolName}`)
+        }
+      }
+    }
+    for (const line of lines) {
+      this.chatContainer.addChild(new Text(line, 1, 0))
+    }
+    this.chatContainer.addChild(new Spacer(1))
+    this.ui.requestRender()
+  }
+
+  private agentStatusIcon(status: string): string {
+    switch (status) {
+      case 'queued': return '○'
+      case 'running': return '●'
+      case 'waiting_permission': return '◐'
+      case 'completed': return '✓'
+      case 'failed': return '✗'
+      default: return '■'
     }
   }
 
@@ -756,7 +967,9 @@ export class App {
 
       try {
         await this.agent.persistMessages()
+        await this.supervisor?.prepareSessionSwitch()
         const messages = await this.sessionManager.switchToSession(selected)
+        await this.supervisor?.restore()
 
         // Replace messages on agent
         this.agent.replaceMessages(messages, 'rebuild')
@@ -996,10 +1209,12 @@ export class App {
 
   private async handleNewSession(): Promise<void> {
     await this.agent.persistMessages()
+    await this.supervisor?.prepareSessionSwitch()
 
     // Create new session
     const cwd = process.cwd()
     await this.sessionManager.create(cwd)
+    await this.supervisor?.restore()
 
     // Reset state
     this.agent.clearMessages()
@@ -2256,6 +2471,77 @@ export class App {
           break
       }
     })
+  }
+
+  private setupSwarmSubscription(): void {
+    if (!this.supervisor) return
+    this.supervisor.subscribe((event: SwarmUIEvent) => {
+      const task = event.task
+      if (event.type === 'agent_spawned') {
+        this.chatContainer.addChild(
+          new Text(
+            theme.dim(`◇ Agent started: ${task.description} (${task.agentId})`),
+            1,
+            0,
+          ),
+        )
+        this.chatContainer.addChild(new Spacer(1))
+      } else if (event.type === 'agent_completed') {
+        const result = task.result?.trim()
+        const preview = result && result.length > 600
+          ? `${result.slice(0, 600)}…`
+          : result
+        this.chatContainer.addChild(
+          new Text(
+            theme.fg('green', `✓ ${task.description} completed`),
+            1,
+            0,
+          ),
+        )
+        if (preview) this.chatContainer.addChild(new Text(preview, 1, 0))
+        this.chatContainer.addChild(new Spacer(1))
+      } else if (event.type === 'agent_failed') {
+        this.chatContainer.addChild(
+          new Text(
+            theme.fg('red', `✗ ${task.description}: ${task.error ?? 'failed'}`),
+            1,
+            0,
+          ),
+        )
+        this.chatContainer.addChild(new Spacer(1))
+      }
+      this.updateAgentStatusLine()
+      this.footer.invalidate()
+      this.ui.requestRender()
+    })
+    this.updateAgentStatusLine()
+  }
+
+  private updateAgentStatusLine(): void {
+    if (!this.supervisor) return
+    const active = this.supervisor.listAgents().filter(({ task }) =>
+      task.status === 'queued' ||
+      task.status === 'running' ||
+      task.status === 'waiting_permission'
+    )
+    const text = active.length === 0
+      ? ''
+      : `Agents: ${active.map(({ task, activity }) =>
+          `${this.agentStatusIcon(task.status)} ${task.description}${activity ? ` (${activity})` : ''}`
+        ).join(' · ')}`
+    if (!text) {
+      if (this.agentStatusText) {
+        this.statusContainer.removeChild(this.agentStatusText)
+        this.agentStatusText = undefined
+      }
+      return
+    }
+    if (!this.agentStatusText) {
+      this.agentStatusText = new Text(theme.dim(text), 1, 0)
+      this.statusContainer.addChild(this.agentStatusText)
+    } else {
+      this.agentStatusText.setText(theme.dim(text))
+    }
   }
 
   private updateStreamingToolCall(message: AgentMessage, forceRender: boolean): void {
