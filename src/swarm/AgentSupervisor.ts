@@ -60,6 +60,7 @@ function describeActivity(event: MicrocodeAgentEvent): string | undefined {
 export interface AgentSupervisorOptions {
   coordinator: MicrocodeAgent
   maxWorkers?: number
+  maxHistory?: number
   timeoutMs?: number
   persistence?: AgentTranscriptPersistence
   createWorker?: typeof createWorkerAgent
@@ -68,7 +69,7 @@ export interface AgentSupervisorOptions {
 
 export class AgentSupervisor {
   readonly registry = new AgentRegistry()
-  readonly tasks = new AgentTaskStore()
+  readonly tasks: AgentTaskStore
   private readonly coordinator: MicrocodeAgent
   private readonly maxWorkers: number
   private readonly timeoutMs: number
@@ -85,6 +86,7 @@ export class AgentSupervisor {
   private shuttingDown = false
 
   constructor(options: AgentSupervisorOptions) {
+    this.tasks = new AgentTaskStore({ maxHistory: options.maxHistory })
     this.coordinator = options.coordinator
     this.maxWorkers = Math.max(1, options.maxWorkers ?? 4)
     this.timeoutMs = Math.max(1, options.timeoutMs ?? 30 * 60 * 1000)

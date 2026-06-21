@@ -398,6 +398,7 @@ export class App {
     if (this.supervisor) {
       this.ui.showOverlay(new AgentPanel(this.supervisor), {
         width: 36,
+        maxHeight: '35%',
         anchor: 'top-right',
         margin: { top: 1, right: 1 },
         nonCapturing: true,

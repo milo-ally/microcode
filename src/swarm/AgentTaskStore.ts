@@ -8,8 +8,20 @@ function cloneTask(task: AgentTask): AgentTask {
   return { ...task, usage: { ...task.usage } }
 }
 
+const TERMINAL_STATUSES: ReadonlySet<AgentTaskStatus> = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+])
+
 export class AgentTaskStore {
   private readonly tasks = new Map<string, AgentTask>()
+  private readonly maxHistory: number
+
+  constructor(options: { maxHistory?: number } = {}) {
+    this.maxHistory = options.maxHistory ?? 50
+  }
 
   create(
     request: SpawnAgentRequest,
@@ -31,7 +43,19 @@ export class AgentTaskStore {
       usage: { tokens: 0, toolCalls: 0 },
     }
     this.tasks.set(task.id, task)
+    this.evict()
     return cloneTask(task)
+  }
+
+  private evict(): void {
+    if (this.tasks.size <= this.maxHistory) return
+    const terminal = [...this.tasks.values()]
+      .filter((t) => TERMINAL_STATUSES.has(t.status))
+      .sort((a, b) => a.createdAt - b.createdAt)
+    const toRemove = this.tasks.size - this.maxHistory
+    for (let i = 0; i < toRemove && i < terminal.length; i++) {
+      this.tasks.delete(terminal[i].id)
+    }
   }
 
   restore(tasks: readonly AgentTask[]): void {
