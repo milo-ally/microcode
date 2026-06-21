@@ -43,6 +43,7 @@ export class SessionManager implements AgentSessionPersistence {
   private titleCache: Map<string, string> | null = null
   private readonly taskSystem: TaskSystem
   private readonly agentsRoot: string
+  private readonly manifestQueues = new Map<string, Promise<void>>()
 
   constructor(options: { tasksRoot?: string; agentsRoot?: string } = {}) {
     const fs = new NodeFileSystem('/')
@@ -213,12 +214,29 @@ export class SessionManager implements AgentSessionPersistence {
   }
 
   async saveAgentManifest(tasks: readonly AgentTask[]): Promise<void> {
+    return this.withManifestLock(() => this.writeManifestUnsafe(tasks))
+  }
+
+  private async writeManifestUnsafe(tasks: readonly AgentTask[]): Promise<void> {
     const dir = this.getAgentSessionDir()
     await mkdir(dir, { recursive: true })
     await this.atomicWrite(
       path.join(dir, 'manifest.json'),
       JSON.stringify({ version: 1, tasks }, null, 2),
     )
+  }
+
+  private withManifestLock<T>(operation: () => Promise<T>): Promise<T> {
+    const key = this.requireSessionId()
+    const previous = this.manifestQueues.get(key) ?? Promise.resolve()
+    const result = previous.catch(() => undefined).then(operation)
+    const tail = result.then(() => undefined, () => undefined)
+    this.manifestQueues.set(key, tail as Promise<void>)
+    return result.finally(() => {
+      if (this.manifestQueues.get(key) === (tail as Promise<void>)) {
+        this.manifestQueues.delete(key)
+      }
+    })
   }
 
   async loadAgentManifest(): Promise<AgentTask[]> {
@@ -274,7 +292,7 @@ export class SessionManager implements AgentSessionPersistence {
   }
 
   private async atomicWrite(file: string, content: string): Promise<void> {
-    const temp = `${file}.${process.pid}.${Date.now()}.tmp`
+    const temp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
     await writeFile(temp, content, 'utf8')
     await rename(temp, file)
   }

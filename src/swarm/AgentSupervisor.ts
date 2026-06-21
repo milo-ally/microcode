@@ -62,6 +62,8 @@ export interface AgentSupervisorOptions {
   maxWorkers?: number
   maxHistory?: number
   timeoutMs?: number
+  /** Debounce window in ms for batching agent result notifications (default 500). */
+  notifyDebounceMs?: number
   persistence?: AgentTranscriptPersistence
   createWorker?: typeof createWorkerAgent
   configureWorker?: (worker: MicrocodeAgent) => void
@@ -83,6 +85,9 @@ export class AgentSupervisor {
   private readonly unsubscribers = new Map<string, () => void>()
   private readonly delivered = new Set<string>()
   private readonly queuedPrompts = new Map<string, string>()
+  private readonly pendingNotifications: Readonly<AgentTask>[] = []
+  private notifyTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly notifyDebounceMs: number
   private shuttingDown = false
 
   constructor(options: AgentSupervisorOptions) {
@@ -90,6 +95,7 @@ export class AgentSupervisor {
     this.coordinator = options.coordinator
     this.maxWorkers = Math.max(1, options.maxWorkers ?? 4)
     this.timeoutMs = Math.max(1, options.timeoutMs ?? 30 * 60 * 1000)
+    this.notifyDebounceMs = Math.max(0, options.notifyDebounceMs ?? 500)
     this.persistence = options.persistence
     this.workerFactory = options.createWorker ?? createWorkerAgent
     this.configureWorker = options.configureWorker
@@ -203,14 +209,12 @@ export class AgentSupervisor {
     const task = this.tasks.getByAgent(agentId)
     if (!worker || !task) throw new Error(`Agent not found: ${agentId}`)
     if (!message.trim()) throw new Error('Message cannot be empty.')
-    if (task.status === 'cancelled' || task.status === 'failed') {
-      throw new Error(`Cannot message agent in ${task.status} state.`)
-    }
     const followUp = this.userMessage(message)
     if (worker.isBusy()) {
       worker.followUp(followUp)
       return
     }
+    // Re-queue idle or failed/cancelled agents so the coordinator can retry
     this.tasks.update(task.id, {
       status: 'queued',
       completedAt: undefined,
@@ -275,6 +279,10 @@ export class AgentSupervisor {
     )
     for (const unsubscribe of this.unsubscribers.values()) unsubscribe()
     this.unsubscribers.clear()
+    if (this.notifyTimer) clearTimeout(this.notifyTimer)
+    this.notifyTimer = null
+    // Flush any remaining pending notifications so the coordinator has final state
+    this.flushNotifications()
     await this.persistManifest()
   }
 
@@ -414,16 +422,30 @@ export class AgentSupervisor {
       )
     }
     await this.persistManifest()
-    this.notifyCoordinator(task)
+    this.scheduleNotification(task)
   }
 
-  private notifyCoordinator(task: Readonly<AgentTask>): void {
+  private scheduleNotification(task: Readonly<AgentTask>): void {
     if (this.delivered.has(task.id)) return
     this.delivered.add(task.id)
-    const result = task.result ? `\n<result>${task.result}</result>` : ''
-    const error = task.error ? `\n<error>${task.error}</error>` : ''
+    this.pendingNotifications.push(task)
+    if (this.notifyTimer) clearTimeout(this.notifyTimer)
+    this.notifyTimer = setTimeout(() => {
+      this.notifyTimer = null
+      this.flushNotifications()
+    }, this.notifyDebounceMs)
+  }
+
+  private flushNotifications(): void {
+    const batch = this.pendingNotifications.splice(0)
+    if (batch.length === 0) return
+    const results = batch.map((task) => {
+      const result = task.result ? `\n  <result>${task.result}</result>` : ''
+      const error = task.error ? `\n  <error>${task.error}</error>` : ''
+      return `  <agent-result>\n    <task-id>${task.id}</task-id>\n    <agent-id>${task.agentId}</agent-id>\n    <status>${task.status}</status>${result}${error}\n    <usage tokens="${task.usage.tokens}" tool-calls="${task.usage.toolCalls}" />\n  </agent-result>`
+    }).join('\n')
     const notification = this.userMessage(
-      `<agent-result>\n<task-id>${task.id}</task-id>\n<agent-id>${task.agentId}</agent-id>\n<status>${task.status}</status>${result}${error}\n<usage tokens="${task.usage.tokens}" tool-calls="${task.usage.toolCalls}" />\n</agent-result>`,
+      `<agent-results>\n${results}\n</agent-results>`,
     )
     if (this.coordinator.isBusy()) {
       this.coordinator.followUp(notification)
