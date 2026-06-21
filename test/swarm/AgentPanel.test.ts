@@ -23,6 +23,7 @@ describe('AgentPanel', () => {
           description: 'Inspect authentication implementation',
         },
         activity: 'Reading src/auth/refresh.ts',
+        toolHistory: [],
       }],
     } as any)
     const lines = panel.render(32)

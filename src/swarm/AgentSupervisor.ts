@@ -57,6 +57,42 @@ function describeActivity(event: MicrocodeAgentEvent): string | undefined {
   }
 }
 
+function toolDetail(toolName: string, args: Record<string, unknown>): string {
+  switch (toolName) {
+    case 'bash': {
+      const cmd = typeof args.command === 'string' ? args.command : ''
+      const preview = cmd.length > 40 ? `${cmd.slice(0, 40)}…` : cmd
+      return preview || 'bash'
+    }
+    case 'file_read': {
+      const p = typeof args.file_path === 'string' ? args.file_path : ''
+      return basename(p) || 'file'
+    }
+    case 'file_edit': {
+      const p = typeof args.file_path === 'string' ? args.file_path : ''
+      return basename(p) || 'edit'
+    }
+    case 'file_write': {
+      const p = typeof args.file_path === 'string' ? args.file_path : ''
+      return basename(p) || 'write'
+    }
+    case 'grep': {
+      const pattern = typeof args.pattern === 'string' ? args.pattern : ''
+      const preview = pattern.length > 30 ? `${pattern.slice(0, 30)}…` : pattern
+      return preview || 'grep'
+    }
+    case 'glob':
+      return typeof args.pattern === 'string' ? args.pattern : 'glob'
+    default:
+      return ''
+  }
+}
+
+function basename(p: string): string {
+  const s = p.split('/').pop() ?? p
+  return s || p
+}
+
 export interface AgentSupervisorOptions {
   coordinator: MicrocodeAgent
   maxWorkers?: number
@@ -81,6 +117,7 @@ export class AgentSupervisor {
   private readonly listeners = new Set<SwarmUIEventListener>()
   private readonly queue: string[] = []
   private readonly activities = new Map<string, string>()
+  private readonly toolHistory = new Map<string, { name: string; done: boolean; error: boolean; detail?: string }[]>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly unsubscribers = new Map<string, () => void>()
   private readonly delivered = new Set<string>()
@@ -179,7 +216,12 @@ export class AgentSupervisor {
         parentId: task.parentAgentId,
       },
       activity: this.activities.get(task.agentId),
+      toolHistory: this.toolHistory.get(task.agentId) ?? [],
     }))
+  }
+
+  getToolHistory(agentId: string): readonly { name: string; done: boolean; error: boolean; detail?: string }[] {
+    return this.toolHistory.get(agentId) ?? []
   }
 
   getRunningCount(): number {
@@ -392,6 +434,8 @@ export class AgentSupervisor {
   }
 
   private attachWorker(worker: MicrocodeAgent, taskId: string): void {
+    const agentId = worker.getId()
+    this.toolHistory.set(agentId, [])
     const unsubscribe = worker.subscribe((event) => {
       const task = this.tasks.get(taskId)
       if (!task) return
@@ -399,6 +443,27 @@ export class AgentSupervisor {
         this.tasks.update(taskId, {
           usage: { toolCalls: task.usage.toolCalls + 1 },
         })
+        const history = this.toolHistory.get(agentId) ?? []
+        history.push({ name: event.toolName, done: false, error: false })
+        if (history.length > 12) history.shift()
+        this.toolHistory.set(agentId, history)
+      }
+      if (event.type === 'tool_execution_start') {
+        const history = this.toolHistory.get(agentId) ?? []
+        const entry = [...history].reverse().find(
+          (h) => h.name === event.toolName && !h.detail,
+        )
+        if (entry) entry.detail = toolDetail(event.toolName, event.args as Record<string, unknown>)
+      }
+      if (event.type === 'tool_finished') {
+        const history = this.toolHistory.get(agentId) ?? []
+        const entry = [...history].reverse().find(
+          (h) => h.name === event.toolName && !h.done,
+        )
+        if (entry) {
+          entry.done = true
+          entry.error = event.isError
+        }
       }
       if (event.type === 'permission_requested') {
         const waiting = this.tasks.update(taskId, {

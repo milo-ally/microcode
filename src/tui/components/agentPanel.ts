@@ -8,6 +8,7 @@ import type { AgentSupervisor, AgentRuntimeState } from '../../swarm/index.ts'
 
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'waiting_permission'])
 const MAX_TERMINAL = 3
+const TOOL_HISTORY_LIMIT = 6
 
 function icon(status: string): string {
   switch (status) {
@@ -20,10 +21,68 @@ function icon(status: string): string {
   }
 }
 
-function borderLine(content: string, width: number): string {
-  const available = Math.max(1, width - 4)
-  const value = truncateToWidth(content, available, '…')
-  return `│ ${value}${' '.repeat(Math.max(0, available - visibleWidth(value)))} │`
+function toolStatus(entry: { done: boolean; error: boolean }): { icon: string; fg: (s: string) => string } {
+  if (!entry.done) return { icon: '●', fg: chalk.hex('#00d7ff') }
+  return entry.error
+    ? { icon: '✗', fg: chalk.hex('#cc0000') }
+    : { icon: '✓', fg: chalk.hex('#00aa00') }
+}
+
+function fit(content: string, maxWidth: number): string {
+  return truncateToWidth(content, Math.max(1, maxWidth), '…')
+}
+
+// ── border/indent helpers ──
+
+function hdr(text: string, width: number): string {
+  const inner = width - 4
+  return `│ ${chalk.hex('#00d7ff')(fit(text, inner))}${' '.repeat(Math.max(0, inner - visibleWidth(text)))} │`
+}
+
+function row(text: string, width: number, fg?: (s: string) => string): string {
+  const inner = width - 4
+  const colored = fg ? fg(text) : text
+  return `│ ${fit(colored, inner)}${' '.repeat(Math.max(0, inner - visibleWidth(text)))} │`
+}
+
+function indent(prefix: string, text: string, width: number, fg?: (s: string) => string): string {
+  const inner = width - 4 - 2 // 2-char prefix indent
+  const colored = fg ? fg(text) : text
+  return `│ ${prefix}${fit(colored, inner)}${' '.repeat(Math.max(0, inner - visibleWidth(text)))} │`
+}
+
+// ── tree rendering ──
+
+function renderToolTree(
+  history: readonly { name: string; done: boolean; error: boolean }[],
+  width: number,
+): string[] {
+  const lines: string[] = []
+  const shown = history.slice(-TOOL_HISTORY_LIMIT)
+  for (let i = 0; i < shown.length; i++) {
+    const entry = shown[i]
+    const prefix = i === shown.length - 1 ? ' └─ ' : ' ├─ '
+    const s = toolStatus(entry)
+    lines.push(indent(prefix, `${s.icon} ${entry.name}`, width, s.fg))
+  }
+  if (history.length > TOOL_HISTORY_LIMIT) {
+    lines.push(indent('  ', chalk.hex('#555555')(`…${history.length - TOOL_HISTORY_LIMIT} more`), width))
+  }
+  return lines
+}
+
+function renderTerminalSummary(
+  history: readonly { name: string; done: boolean; error: boolean }[],
+  width: number,
+): string[] {
+  if (history.length === 0) return []
+  const dim = chalk.hex('#666666')
+  const last = history[history.length - 1]
+  const s = toolStatus(last)
+  const summary = history.length === 1
+    ? `${s.icon} ${last.name}`
+    : `${s.icon} ${last.name}  (${history.length} tools)`
+  return [indent(' └─ ', summary, width, dim)]
 }
 
 function partition(states: readonly AgentRuntimeState[]): {
@@ -42,6 +101,8 @@ function partition(states: readonly AgentRuntimeState[]): {
   return { active, terminal }
 }
 
+// ── component ──
+
 export class AgentPanel implements Component {
   constructor(private readonly supervisor: AgentSupervisor) {}
 
@@ -49,24 +110,22 @@ export class AgentPanel implements Component {
 
   render(width: number): string[] {
     const states = this.supervisor.listAgents()
-    const innerWidth = Math.max(1, width - 2)
-    const lines = [
-      chalk.hex('#666666')(`┌${'─'.repeat(innerWidth)}┐`),
-      chalk.hex('#00d7ff')(borderLine(
-        `Agents ${this.supervisor.getRunningCount()}/${this.supervisor.getMaxWorkers()}`,
-        width,
-      )),
+    const inner = Math.max(1, width - 2)
+    const line = (s: string) => chalk.hex('#666666')(s)
+    const lines: string[] = [
+      line(`┌${'─'.repeat(inner)}┐`),
+      hdr(`Agents ${this.supervisor.getRunningCount()}/${this.supervisor.getMaxWorkers()}`, width),
     ]
 
     if (states.length === 0) {
-      lines.push(chalk.hex('#777777')(borderLine('No delegated work', width)))
+      lines.push(row('No delegated work', width, chalk.hex('#777777')))
     } else {
       const { active, terminal } = partition(states)
 
-      for (const { task, activity } of active) {
-        lines.push(borderLine(`${icon(task.status)} ${task.description}`, width))
-        if (activity && (task.status === 'running' || task.status === 'waiting_permission')) {
-          lines.push(chalk.hex('#777777')(borderLine(`  ${activity}`, width)))
+      for (const { task, toolHistory } of active) {
+        lines.push(row(`${icon(task.status)} ${task.description}`, width))
+        if (toolHistory.length > 0) {
+          lines.push(...renderToolTree(toolHistory, width))
         }
       }
 
@@ -74,18 +133,21 @@ export class AgentPanel implements Component {
         const shown = terminal
           .sort((a, b) => (b.task.completedAt ?? 0) - (a.task.completedAt ?? 0))
           .slice(0, MAX_TERMINAL)
-        for (const { task } of shown) {
-          lines.push(chalk.hex('#666666')(borderLine(`${icon(task.status)} ${task.description}`, width)))
+        for (const { task, toolHistory } of shown) {
+          lines.push(row(`${icon(task.status)} ${task.description}`, width, chalk.hex('#666666')))
+          if (toolHistory.length > 0) {
+            lines.push(...renderTerminalSummary(toolHistory, width))
+          }
         }
 
         const hidden = terminal.length - shown.length
         if (hidden > 0) {
-          lines.push(chalk.hex('#555555')(borderLine(`…and ${hidden} more completed`, width)))
+          lines.push(row(`…and ${hidden} more completed`, width, chalk.hex('#555555')))
         }
       }
     }
 
-    lines.push(chalk.hex('#666666')(`└${'─'.repeat(innerWidth)}┘`))
+    lines.push(line(`└${'─'.repeat(inner)}┘`))
     return lines
   }
 }

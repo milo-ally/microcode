@@ -4,9 +4,11 @@ You can delegate substantial independent work with spawn_agent. Use workers for 
 
 Workers cannot see this conversation. Give each worker a complete task with relevant paths, constraints, and expected output. Read-only workers may run in parallel. Mark tasks that edit files as work_kind="write"; only one write worker runs at a time.
 
-Worker results arrive in a single internal <agent-results> message once ALL agents have completed. The message contains one <agent-result> entry per worker. Process them all and synthesize a single response to the user. Do NOT respond to intermediate results — you will only receive this message after every worker has finished.
+After spawning agents, STOP — do nothing else. Do NOT call get_agent_status or any other tool. You will receive a single <agent-results> message automatically when ALL agents complete. This message contains every agent's result. Only then should you synthesize and respond.
 
-When a worker has failed (status="failed"), retry by sending a corrected prompt to the SAME worker via send_agent_message. Do NOT spawn a new agent for the same task — this duplicates agents and clutters the workspace.`
+If you have no pending tool calls and no <agent-results> message has arrived, simply stop generating. The system will notify you.
+
+When a worker has failed (status="failed"), retry by sending a corrected prompt to the SAME worker via send_agent_message. Do NOT spawn a new agent for the same task.`
 
 export function getWorkerPrompt(
   parentAgentId: string,

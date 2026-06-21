@@ -18,12 +18,29 @@ export function createGetAgentStatusTool(
   supervisor: AgentSupervisor,
   _coordinatorId: string,
 ): AgentTool<typeof statusSchema, unknown> {
+  let lastCall = 0
+
   return {
     name: TOOL_NAME,
     label: 'Agent status',
-    description: 'List worker status. Do not poll; completion notifications arrive automatically.',
+    description:
+      'ONE-TIME check of worker status. Results arrive automatically when agents complete — ' +
+      'you do NOT need to poll. Calling this repeatedly will return an error.',
     parameters: statusSchema,
     async execute(_id, input: Static<typeof statusSchema>) {
+      // Rate-limit: refuse calls within 5 seconds of each other
+      const now = Date.now()
+      if (now - lastCall < 5000) {
+        return {
+          content: [{
+            type: 'text',
+            text: 'Stop polling. Agent results arrive automatically when all workers finish. Do not call this tool again.',
+          }],
+          isError: true,
+        }
+      }
+      lastCall = now
+
       const states = supervisor.listAgents().filter(
         (state) => !input.agent_id || state.task.agentId === input.agent_id,
       )
