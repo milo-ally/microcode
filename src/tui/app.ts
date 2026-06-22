@@ -2700,9 +2700,10 @@ export class App {
     }
 
     // ── Diff update: reconcile generated lines with existing widgets ──
-    // Status line widgets start after the working text (index 1 of agentTreeWidgets)
-    const statusStartIndex = this.coordinatorWorking ? 1 : 0
-    const statusWidgets = this.agentTreeWidgets.slice(statusStartIndex)
+    // Filter out the working-text spinner — it is managed separately.
+    const statusWidgets = this.agentTreeWidgets.filter(
+      (widget) => widget !== this.agentTreeWorkingText,
+    )
 
     // Add/update widgets for each line
     for (let i = 0; i < lines.length; i++) {
