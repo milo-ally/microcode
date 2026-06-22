@@ -6,7 +6,7 @@ import {
 import chalk from 'chalk'
 import type { AgentSupervisor, AgentRuntimeState } from '../../swarm/index.ts'
 
-const ACTIVE_STATUSES = new Set(['queued', 'running', 'waiting_permission'])
+const ACTIVE_STATUSES = new Set(['queued', 'running'])
 const MAX_TERMINAL = 3
 const TOOL_HISTORY_LIMIT = 6
 
@@ -14,7 +14,7 @@ function icon(status: string): string {
   switch (status) {
     case 'queued': return '○'
     case 'running': return '●'
-    case 'waiting_permission': return '◐'
+    case 'blocked': return '!'
     case 'completed': return '✓'
     case 'failed': return '✗'
     default: return '■'

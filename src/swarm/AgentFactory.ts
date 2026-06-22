@@ -1,19 +1,36 @@
 import { createMicrocodeAgentRuntime, type MicrocodeAgent } from '../agent/index.ts'
 import { getWorkerPrompt } from './prompts.ts'
 import type { AgentFactoryContext } from './types.ts'
+import type { AgentCapability } from '../permissions/index.ts'
+import { ALL_CAPABILITIES, READ_CAPABILITIES } from '../permissions/index.ts'
 
-const READ_ONLY_DENY = [
-  { toolName: 'bash' },
-  { toolName: 'file_edit' },
-  { toolName: 'file_write' },
-]
+export function getWorkerCapabilities(
+  context: AgentFactoryContext,
+  grants: Iterable<AgentCapability> = [],
+): AgentCapability[] {
+  const parentCapabilities = new Set(
+    context.parent.getPermissionSnapshot().capabilities,
+  )
+  const profile = context.request.workKind === 'read'
+    ? new Set<AgentCapability>([...READ_CAPABILITIES, ...grants])
+    : new Set<AgentCapability>([
+        ...ALL_CAPABILITIES.filter((capability) => capability !== 'agents.spawn'),
+        ...grants,
+      ])
+  const requested = context.request.capabilities
+    ? new Set(context.request.capabilities)
+    : profile
+  return [...requested].filter((capability) =>
+    profile.has(capability) && parentCapabilities.has(capability)
+  )
+}
 
 export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent {
   const { parent, request, agentId } = context
   const parentSnapshot = parent.getSnapshot()
   const parentMode = parent.getPermissionMode()
   const requestedMode = request.permissionMode ?? parentMode
-  const mode = request.workKind === 'read' || parentMode === 'plan'
+  const mode = parentMode === 'plan'
     ? 'plan'
     : parentMode === 'interactive' && requestedMode === 'auto-approve'
       ? 'interactive'
@@ -32,9 +49,7 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
     },
     permission: {
       mode,
-      deny: request.workKind === 'read'
-        ? READ_ONLY_DENY.map((r) => r.toolName)
-        : [],
+      capabilities: getWorkerCapabilities(context),
     },
     systemPromptSuffix: getWorkerPrompt(
       request.parentAgentId,
@@ -42,19 +57,14 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
     ),
   })
 
-  // Inherit all permission rules from parent (allow, deny, ask)
-  // Mode is NOT inherited — worker mode is set above based on workKind
-  worker.inheritPermissions(
-    parent.getPermissionSnapshot(),
-    request.workKind === 'read' ? READ_ONLY_DENY : [],
-    false,
-  )
+  // Inherit parent rules, while the worker profile keeps its own capability ceiling.
+  worker.inheritPermissions(parent.getPermissionSnapshot(), [], false)
 
   for (const skillName of parent.getLoadedSkillNames()) {
     if (worker.getSkills().some((skill) => skill.name === skillName)) {
       worker.loadSkill(skillName)
     }
   }
-  worker.removeTools(['task'])
+  worker.removeTools(['task', 'bash', 'Ask'])
   return worker
 }

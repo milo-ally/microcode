@@ -4,7 +4,10 @@ import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
 import { AgentRegistry } from './AgentRegistry.ts'
 import { AgentTaskStore } from './AgentTaskStore.ts'
 import { createWorkerAgent } from './AgentFactory.ts'
+import { getWorkerCapabilities } from './AgentFactory.ts'
+import type { AgentCapability } from '../permissions/index.ts'
 import type {
+  AgentBatch,
   AgentRuntimeState,
   AgentTask,
   AgentTranscriptPersistence,
@@ -39,10 +42,13 @@ function describeActivity(event: MicrocodeAgentEvent): string | undefined {
       : undefined
   switch (event.toolName) {
     case 'file_read':
+    case 'read':
       return path ? `Reading ${path}` : 'Reading a file'
     case 'file_edit':
+    case 'edit':
       return path ? `Editing ${path}` : 'Editing a file'
     case 'file_write':
+    case 'write':
       return path ? `Writing ${path}` : 'Writing a file'
     case 'grep':
       return typeof args.pattern === 'string'
@@ -64,15 +70,18 @@ function toolDetail(toolName: string, args: Record<string, unknown>): string {
       const preview = cmd.length > 40 ? `${cmd.slice(0, 40)}…` : cmd
       return preview || 'bash'
     }
-    case 'file_read': {
+    case 'file_read':
+    case 'read': {
       const p = typeof args.file_path === 'string' ? args.file_path : ''
       return basename(p) || 'file'
     }
-    case 'file_edit': {
+    case 'file_edit':
+    case 'edit': {
       const p = typeof args.file_path === 'string' ? args.file_path : ''
       return basename(p) || 'edit'
     }
-    case 'file_write': {
+    case 'file_write':
+    case 'write': {
       const p = typeof args.file_path === 'string' ? args.file_path : ''
       return basename(p) || 'write'
     }
@@ -98,7 +107,7 @@ export interface AgentSupervisorOptions {
   maxWorkers?: number
   maxHistory?: number
   timeoutMs?: number
-  /** Debounce window in ms for batching agent result notifications (default 500). */
+  /** @deprecated Batches are sealed from coordinator lifecycle events. */
   notifyDebounceMs?: number
   persistence?: AgentTranscriptPersistence
   createWorker?: typeof createWorkerAgent
@@ -120,12 +129,12 @@ export class AgentSupervisor {
   private readonly toolHistory = new Map<string, { name: string; done: boolean; error: boolean; detail?: string }[]>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly unsubscribers = new Map<string, () => void>()
-  private readonly delivered = new Set<string>()
   private readonly queuedPrompts = new Map<string, string>()
-  private readonly pendingNotifications: Readonly<AgentTask>[] = []
-  private readonly accumulatedResults: Readonly<AgentTask>[] = []
-  private notifyTimer: ReturnType<typeof setTimeout> | null = null
-  private readonly notifyDebounceMs: number
+  private readonly batches = new Map<string, AgentBatch>()
+  private readonly sessionCapabilityGrants = new Set<AgentCapability>()
+  private currentCoordinatorTurnId?: string
+  private coordinatorUnsubscribe?: () => void
+  private sealTimer: ReturnType<typeof setTimeout> | null = null
   private shuttingDown = false
 
   constructor(options: AgentSupervisorOptions) {
@@ -133,26 +142,53 @@ export class AgentSupervisor {
     this.coordinator = options.coordinator
     this.maxWorkers = Math.max(1, options.maxWorkers ?? 4)
     this.timeoutMs = Math.max(1, options.timeoutMs ?? 30 * 60 * 1000)
-    this.notifyDebounceMs = Math.max(0, options.notifyDebounceMs ?? 500)
     this.persistence = options.persistence
     this.workerFactory = options.createWorker ?? createWorkerAgent
     this.configureWorker = options.configureWorker
     this.registry.register(this.coordinator)
+    this.attachCoordinator()
   }
 
   async restore(): Promise<void> {
     const tasks = await this.persistence?.loadAgentManifest?.()
+    const batches = await this.persistence?.loadAgentBatches?.()
     if (tasks) {
       this.tasks.restore(tasks)
+      for (const batch of batches ?? []) {
+        this.batches.set(batch.id, {
+          ...batch,
+          taskIds: [...batch.taskIds],
+        })
+      }
+      for (const task of this.tasks.list()) {
+        if (!this.batches.has(task.batchId)) {
+          this.batches.set(task.batchId, {
+            id: task.batchId,
+            coordinatorTurnId: 'restored',
+            status: 'sealed',
+            taskIds: this.tasks.list()
+              .filter((candidate) => candidate.batchId === task.batchId)
+              .map((candidate) => candidate.id),
+            createdAt: task.createdAt,
+            sealedAt: Date.now(),
+          })
+        }
+      }
+      for (const batch of this.batches.values()) {
+        if (batch.status === 'open') {
+          batch.status = 'sealed'
+          batch.sealedAt = Date.now()
+        }
+      }
       await this.persistManifest()
+      for (const batch of this.batches.values()) this.tryDeliverBatch(batch.id)
     }
   }
 
   async prepareSessionSwitch(): Promise<void> {
     const active = this.tasks.list().filter((task) =>
       task.status === 'queued' ||
-      task.status === 'running' ||
-      task.status === 'waiting_permission'
+      task.status === 'running'
     )
     for (const task of active) {
       this.registry.get(task.agentId)?.abort()
@@ -176,9 +212,9 @@ export class AgentSupervisor {
     this.unsubscribers.clear()
     this.queue.length = 0
     this.activities.clear()
-    this.delivered.clear()
     this.queuedPrompts.clear()
     this.tasks.clear()
+    this.batches.clear()
   }
 
   subscribe(listener: SwarmUIEventListener): () => void {
@@ -191,11 +227,46 @@ export class AgentSupervisor {
     const snapshot = this.coordinator.getPermissionSnapshot()
     for (const agent of this.registry.list()) {
       if (agent.getId() === this.coordinator.getId()) continue
-      // Read-only workers stay in plan mode regardless of parent
       const task = this.tasks.getByAgent(agent.getId())
-      const isReadOnly = task?.workKind === 'read'
-      agent.inheritPermissions(snapshot, [], updateMode && !isReadOnly)
+      if (!task) continue
+      agent.inheritPermissions(snapshot, [], updateMode)
+      agent.setCapabilities(getWorkerCapabilities({
+        parent: this.coordinator,
+        request: {
+          parentAgentId: task.parentAgentId,
+          description: task.description,
+          prompt: task.prompt,
+          role: task.role,
+          workKind: task.workKind,
+        },
+        agentId: task.agentId,
+      }, this.sessionCapabilityGrants))
+      agent.setApprovedCapabilities(this.sessionCapabilityGrants)
     }
+  }
+
+  grantSessionCapabilities(capabilities: readonly AgentCapability[]): AgentCapability[] {
+    const parentCapabilities = new Set(
+      this.coordinator.getPermissionSnapshot().capabilities,
+    )
+    const granted = capabilities.filter((capability) => parentCapabilities.has(capability))
+    for (const capability of granted) this.sessionCapabilityGrants.add(capability)
+    this.syncPermissionsToWorkers(false)
+    return granted
+  }
+
+  getGrantableCapabilities(): AgentCapability[] {
+    const blocked = new Set<AgentCapability>()
+    for (const task of this.tasks.list()) {
+      for (const blocker of task.blockers) blocked.add(blocker.requiredCapability)
+    }
+    const parentCapabilities = new Set(
+      this.coordinator.getPermissionSnapshot().capabilities,
+    )
+    return [...blocked].filter((capability) =>
+      parentCapabilities.has(capability) &&
+      !this.sessionCapabilityGrants.has(capability)
+    )
   }
 
   getMaxWorkers(): number {
@@ -207,7 +278,9 @@ export class AgentSupervisor {
   }
 
   listAgents(): readonly AgentRuntimeState[] {
-    return this.tasks.list().map((task) => ({
+    const latestByAgent = new Map<string, Readonly<AgentTask>>()
+    for (const task of this.tasks.list()) latestByAgent.set(task.agentId, task)
+    return [...latestByAgent.values()].map((task) => ({
       task,
       identity: this.registry.get(task.agentId)?.getIdentity() ?? {
         id: task.agentId,
@@ -226,7 +299,7 @@ export class AgentSupervisor {
 
   getRunningCount(): number {
     return this.tasks.list().filter((task) =>
-      task.status === 'running' || task.status === 'waiting_permission'
+      task.status === 'running'
     ).length
   }
 
@@ -239,10 +312,12 @@ export class AgentSupervisor {
       throw new Error('Agent description and prompt are required.')
     }
 
+    const batch = this.ensureOpenBatch()
     const task = this.tasks.create(request, {
       taskId: createId('task'),
       agentId: createId('agent'),
-    })
+    }, batch.id)
+    batch.taskIds.push(task.id)
     const worker = this.workerFactory({
       parent: this.coordinator,
       request,
@@ -256,26 +331,30 @@ export class AgentSupervisor {
     this.emit({ type: 'agent_spawned', task })
     await this.persistManifest()
     this.drainQueue()
+    this.scheduleBatchSeal()
     return this.tasks.get(task.id)!
   }
 
   async send(agentId: string, message: string): Promise<void> {
     const worker = this.registry.get(agentId)
-    const task = this.tasks.getByAgent(agentId)
-    if (!worker || !task) throw new Error(`Agent not found: ${agentId}`)
+    const previous = this.tasks.getByAgent(agentId)
+    if (!worker || !previous) throw new Error(`Agent not found: ${agentId}`)
     if (!message.trim()) throw new Error('Message cannot be empty.')
-    const followUp = this.userMessage(message)
     if (worker.isBusy()) {
-      worker.followUp(followUp)
-      return
+      throw new Error(`Agent ${agentId} is still running.`)
     }
-    // Re-queue idle or failed/cancelled agents so the coordinator can retry
-    this.tasks.update(task.id, {
-      status: 'queued',
-      completedAt: undefined,
-      error: undefined,
-    })
-    this.delivered.delete(task.id)
+    const batch = this.ensureOpenBatch()
+    const task = this.tasks.create({
+      parentAgentId: previous.parentAgentId,
+      description: previous.description,
+      prompt: message,
+      role: previous.role,
+      workKind: previous.workKind,
+    }, {
+      taskId: createId('task'),
+      agentId,
+    }, batch.id)
+    batch.taskIds.push(task.id)
     this.queuedPrompts.set(task.id, message)
     this.queue.push(task.id)
     this.emit({
@@ -283,6 +362,8 @@ export class AgentSupervisor {
       task: this.tasks.get(task.id)!,
     })
     this.drainQueue()
+    await this.persistManifest()
+    this.scheduleBatchSeal()
   }
 
   async stop(agentId: string): Promise<void> {
@@ -291,8 +372,7 @@ export class AgentSupervisor {
     if (!task) throw new Error(`Agent not found: ${agentId}`)
     if (
       task.status !== 'queued' &&
-      task.status !== 'running' &&
-      task.status !== 'waiting_permission'
+      task.status !== 'running'
     ) {
       throw new Error(`Cannot stop agent in ${task.status} state.`)
     }
@@ -315,8 +395,7 @@ export class AgentSupervisor {
     this.shuttingDown = true
     const active = this.tasks.list().filter((task) =>
       task.status === 'queued' ||
-      task.status === 'running' ||
-      task.status === 'waiting_permission'
+      task.status === 'running'
     )
     for (const task of active) {
       this.registry.get(task.agentId)?.abort()
@@ -334,10 +413,15 @@ export class AgentSupervisor {
     )
     for (const unsubscribe of this.unsubscribers.values()) unsubscribe()
     this.unsubscribers.clear()
-    if (this.notifyTimer) clearTimeout(this.notifyTimer)
-    this.notifyTimer = null
-    // Flush any remaining pending notifications so the coordinator has final state
-    this.flushNotifications()
+    if (this.sealTimer) clearTimeout(this.sealTimer)
+    this.sealTimer = null
+    for (const batch of this.batches.values()) {
+      if (batch.status === 'open') {
+        batch.status = 'sealed'
+        batch.sealedAt = Date.now()
+      }
+    }
+    this.coordinatorUnsubscribe?.()
     await this.persistManifest()
   }
 
@@ -351,7 +435,7 @@ export class AgentSupervisor {
         return !this.tasks.list().some((other) =>
           other.id !== task.id &&
           other.workKind === 'write' &&
-          (other.status === 'running' || other.status === 'waiting_permission')
+          other.status === 'running'
         )
       })
       if (index === -1) return
@@ -408,13 +492,17 @@ export class AgentSupervisor {
         this.emit({ type: 'agent_failed', task: failed })
         await this.finishTask(failed)
       } else {
+        const blockers = this.tasks.get(taskId)?.blockers ?? []
         const completed = this.tasks.update(taskId, {
-          status: 'completed',
+          status: blockers.length > 0 ? 'blocked' : 'completed',
           result,
           completedAt: Date.now(),
           usage: { tokens: snapshot.session.totalTokens },
         })
-        this.emit({ type: 'agent_completed', task: completed })
+        this.emit({
+          type: blockers.length > 0 ? 'agent_blocked' : 'agent_completed',
+          task: completed,
+        })
         await this.finishTask(completed)
       }
     } catch (error) {
@@ -433,12 +521,13 @@ export class AgentSupervisor {
     }
   }
 
-  private attachWorker(worker: MicrocodeAgent, taskId: string): void {
+  private attachWorker(worker: MicrocodeAgent, _taskId: string): void {
     const agentId = worker.getId()
     this.toolHistory.set(agentId, [])
     const unsubscribe = worker.subscribe((event) => {
-      const task = this.tasks.get(taskId)
-      if (!task) return
+      const task = this.tasks.getByAgent(agentId)
+      const taskId = task?.id
+      if (!taskId) return
       if (event.type === 'tool_started') {
         this.tasks.update(taskId, {
           usage: { toolCalls: task.usage.toolCalls + 1 },
@@ -466,20 +555,30 @@ export class AgentSupervisor {
         }
       }
       if (event.type === 'permission_requested') {
-        const waiting = this.tasks.update(taskId, {
-          status: 'waiting_permission',
-        })
         this.emit({
           type: 'agent_permission_requested',
-          task: waiting,
+          task,
           toolName: event.request.toolName,
           description: event.request.description ?? event.request.toolName,
         })
-      } else if (event.type === 'permission_resolved') {
+      } else if (event.type === 'permission_blocked') {
         const current = this.tasks.get(taskId)
-        if (current?.status === 'waiting_permission') {
-          const running = this.tasks.update(taskId, { status: 'running' })
-          this.emit({ type: 'agent_status_changed', task: running })
+        if (current) {
+          const duplicate = current.blockers.some((blocker) =>
+            blocker.toolName === event.blocker.toolName &&
+            blocker.operation === event.blocker.operation &&
+            blocker.requiredCapability === event.blocker.requiredCapability
+          )
+          const blocked = duplicate
+            ? current
+            : this.tasks.update(taskId, {
+                blockers: [...current.blockers, { ...event.blocker }],
+              })
+          this.emit({
+            type: 'agent_permission_blocked',
+            task: blocked,
+            blocker: event.blocker,
+          })
         }
       }
       const activity = describeActivity(event)
@@ -500,47 +599,112 @@ export class AgentSupervisor {
       )
     }
     await this.persistManifest()
-    this.scheduleNotification(task)
+    this.tryDeliverBatch(task.batchId)
   }
 
-  private scheduleNotification(task: Readonly<AgentTask>): void {
-    if (this.delivered.has(task.id)) return
-    this.delivered.add(task.id)
-    this.pendingNotifications.push(task)
-    if (this.notifyTimer) clearTimeout(this.notifyTimer)
-    this.notifyTimer = setTimeout(() => {
-      this.notifyTimer = null
-      this.flushNotifications()
-    }, this.notifyDebounceMs)
-  }
+  private tryDeliverBatch(batchId: string): void {
+    const batch = this.batches.get(batchId)
+    if (!batch || batch.status !== 'sealed') return
+    const tasks = batch.taskIds
+      .map((taskId) => this.tasks.get(taskId))
+      .filter((task): task is Readonly<AgentTask> => Boolean(task))
+    if (tasks.length !== batch.taskIds.length) return
+    if (tasks.some((task) => task.status === 'queued' || task.status === 'running')) return
 
-  private flushNotifications(): void {
-    const batch = this.pendingNotifications.splice(0)
-    if (batch.length === 0) return
-    this.accumulatedResults.push(...batch)
-
-    const remaining = this.tasks.list().filter((t) =>
-      t.status === 'queued' || t.status === 'running' || t.status === 'waiting_permission',
-    ).length
-
-    // Hold all results until every agent completes, so the coordinator
-    // sees a single batch and responds once. On shutdown, flush regardless.
-    if (remaining > 0 && !this.shuttingDown) return
-
-    const allResults = this.accumulatedResults.splice(0)
-    const results = allResults.map((task) => {
-      const result = task.result ? `\n  <result>${task.result}</result>` : ''
-      const error = task.error ? `\n  <error>${task.error}</error>` : ''
-      return `  <agent-result>\n    <task-id>${task.id}</task-id>\n    <agent-id>${task.agentId}</agent-id>\n    <status>${task.status}</status>${result}${error}\n    <usage tokens="${task.usage.tokens}" tool-calls="${task.usage.toolCalls}" />\n  </agent-result>`
-    }).join('\n')
+    batch.status = 'delivered'
+    void this.persistManifest()
+    const results = tasks.map((task) => this.serializeTaskResult(task)).join('\n')
     const notification = this.userMessage(
-      `<agent-results remaining="${remaining}">\n${results}\n</agent-results>`,
+      `<agent-results batch-id="${this.xmlEscape(batch.id)}">\n${results}\n</agent-results>`,
     )
     if (this.coordinator.isBusy()) {
       this.coordinator.followUp(notification)
     } else if (!this.shuttingDown) {
       void this.coordinator.prompt(notification)
     }
+  }
+
+  private serializeTaskResult(task: Readonly<AgentTask>): string {
+    const result = task.result
+      ? `\n    <result>${this.xmlEscape(task.result)}</result>`
+      : ''
+    const error = task.error
+      ? `\n    <error>${this.xmlEscape(task.error)}</error>`
+      : ''
+    const blockers = task.blockers.length > 0
+      ? `\n    <blockers>\n${task.blockers.map((blocker) =>
+          `      <blocker type="permission" capability="${this.xmlEscape(blocker.requiredCapability)}" retryable="${blocker.retryable}">\n` +
+          `        <tool>${this.xmlEscape(blocker.toolName)}</tool>\n` +
+          `        <operation>${this.xmlEscape(blocker.operation)}</operation>\n` +
+          `        <reason>${this.xmlEscape(blocker.reason)}</reason>\n` +
+          `        <input>${this.xmlEscape(blocker.inputSummary)}</input>\n` +
+          '      </blocker>'
+        ).join('\n')}\n    </blockers>`
+      : ''
+    return `  <agent-result>\n    <task-id>${this.xmlEscape(task.id)}</task-id>\n` +
+      `    <agent-id>${this.xmlEscape(task.agentId)}</agent-id>\n` +
+      `    <status>${task.status}</status>${result}${error}${blockers}\n` +
+      `    <usage tokens="${task.usage.tokens}" tool-calls="${task.usage.toolCalls}" />\n` +
+      '  </agent-result>'
+  }
+
+  private attachCoordinator(): void {
+    this.coordinatorUnsubscribe = this.coordinator.subscribe((event) => {
+      if (event.type === 'agent_start') {
+        this.currentCoordinatorTurnId = createId('turn')
+      }
+      if (
+        event.type === 'agent_end' ||
+        event.type === 'turn_end' ||
+        event.type === 'tool_finished'
+      ) {
+        this.scheduleBatchSeal()
+      }
+    })
+  }
+
+  private ensureOpenBatch(): AgentBatch {
+    const turnId = this.currentCoordinatorTurnId ?? createId('turn')
+    this.currentCoordinatorTurnId ??= turnId
+    const existing = [...this.batches.values()].find((batch) =>
+      batch.coordinatorTurnId === turnId && batch.status === 'open'
+    )
+    if (existing) return existing
+    const batch: AgentBatch = {
+      id: createId('batch'),
+      coordinatorTurnId: turnId,
+      status: 'open',
+      taskIds: [],
+      createdAt: Date.now(),
+    }
+    this.batches.set(batch.id, batch)
+    return batch
+  }
+
+  private scheduleBatchSeal(): void {
+    if (this.sealTimer) clearTimeout(this.sealTimer)
+    this.sealTimer = setTimeout(() => {
+      this.sealTimer = null
+      if (this.coordinator.isBusy()) return
+      for (const batch of this.batches.values()) {
+        if (batch.status === 'open') {
+          batch.status = 'sealed'
+          batch.sealedAt = Date.now()
+          this.tryDeliverBatch(batch.id)
+        }
+      }
+      this.currentCoordinatorTurnId = undefined
+      void this.persistManifest()
+    }, 0)
+  }
+
+  private xmlEscape(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
   }
 
   private userMessage(content: string): AgentMessage {
@@ -560,6 +724,10 @@ export class AgentSupervisor {
   private async persistManifest(): Promise<void> {
     await this.persistence?.saveAgentManifest?.(
       this.tasks.list() as readonly AgentTask[],
+      [...this.batches.values()].map((batch) => ({
+        ...batch,
+        taskIds: [...batch.taskIds],
+      })),
     )
   }
 }

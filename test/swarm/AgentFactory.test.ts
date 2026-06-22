@@ -34,7 +34,7 @@ describe('AgentFactory permissions', () => {
     expect(worker.hasTool('task')).toBe(false)
   })
 
-  test('forces read workers into plan mode', () => {
+  test('gives read workers a research capability profile', () => {
     const parent = createMicrocodeAgentRuntime({
       identity: { id: 'parent-auto' },
       permission: { mode: 'auto-approve' },
@@ -49,7 +49,30 @@ describe('AgentFactory permissions', () => {
         workKind: 'read',
       },
     })
-    expect(worker.getPermissionMode()).toBe('plan')
+    expect(worker.getPermissionMode()).toBe('auto-approve')
+    expect(worker.checkPermission('bash', { command: 'node --version' }).allowed).toBe(true)
+    expect(worker.checkPermission('bash', { command: 'npm install' }).allowed).toBe(false)
     expect(worker.checkPermission('file_edit', { path: 'x' }).allowed).toBe(false)
+  })
+
+  test('keeps legacy plan mode while exposing only read capabilities', () => {
+    const parent = createMicrocodeAgentRuntime({
+      identity: { id: 'parent-plan' },
+      permission: { mode: 'plan' },
+    })
+    const worker = createWorkerAgent({
+      parent,
+      agentId: 'planned-worker',
+      request: {
+        parentAgentId: parent.getId(),
+        description: 'Plan',
+        prompt: 'Inspect safely',
+        workKind: 'write',
+      },
+    })
+    expect(worker.getPermissionMode()).toBe('plan')
+    expect(worker.getEffectivePolicy().approvalMode).toBe('interactive')
+    expect(worker.checkPermission('bash', { command: 'git status' }).allowed).toBe(true)
+    expect(worker.checkPermission('write', { path: 'x' }).allowed).toBe(false)
   })
 })

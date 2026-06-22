@@ -20,7 +20,7 @@ import {
   type TaskMarkUpdate,
   type TaskReminderUpdate,
 } from '../tasks/TaskSystem.ts'
-import type { AgentTask } from '../swarm/types.ts'
+import type { AgentBatch, AgentTask } from '../swarm/types.ts'
 
 const SESSIONS_DIR = path.join(os.homedir(), '.microcode', 'sessions')
 const TITLES_FILE = path.join(SESSIONS_DIR, '.titles.json')
@@ -213,16 +213,22 @@ export class SessionManager implements AgentSessionPersistence {
     return sessionId
   }
 
-  async saveAgentManifest(tasks: readonly AgentTask[]): Promise<void> {
-    return this.withManifestLock(() => this.writeManifestUnsafe(tasks))
+  async saveAgentManifest(
+    tasks: readonly AgentTask[],
+    batches: readonly AgentBatch[] = [],
+  ): Promise<void> {
+    return this.withManifestLock(() => this.writeManifestUnsafe(tasks, batches))
   }
 
-  private async writeManifestUnsafe(tasks: readonly AgentTask[]): Promise<void> {
+  private async writeManifestUnsafe(
+    tasks: readonly AgentTask[],
+    batches: readonly AgentBatch[],
+  ): Promise<void> {
     const dir = this.getAgentSessionDir()
     await mkdir(dir, { recursive: true })
     await this.atomicWrite(
       path.join(dir, 'manifest.json'),
-      JSON.stringify({ version: 1, tasks }, null, 2),
+      JSON.stringify({ version: 2, tasks, batches }, null, 2),
     )
   }
 
@@ -247,6 +253,19 @@ export class SessionManager implements AgentSessionPersistence {
         tasks?: AgentTask[]
       }
       return Array.isArray(parsed.tasks) ? parsed.tasks : []
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    }
+  }
+
+  async loadAgentBatches(): Promise<AgentBatch[]> {
+    const file = path.join(this.getAgentSessionDir(), 'manifest.json')
+    try {
+      const parsed = JSON.parse(await readFile(file, 'utf8')) as {
+        batches?: AgentBatch[]
+      }
+      return Array.isArray(parsed.batches) ? parsed.batches : []
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
       throw error

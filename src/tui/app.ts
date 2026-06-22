@@ -691,6 +691,21 @@ export class App {
       this.chatContainer.addChild(new AgentResult(task.result, Boolean(task.error)))
     }
 
+    if (task.blockers.length > 0) {
+      this.chatContainer.addChild(new Text(dim('│'), 1, 0))
+      this.chatContainer.addChild(
+        new Text(`├─ ${accent('Blocked')} ${dim('─'.repeat(Math.max(0, 48 - 10)))}`, 1, 0),
+      )
+      for (const blocker of task.blockers) {
+        this.chatContainer.addChild(
+          new Text(`│  ${blocker.toolName}: ${blocker.operation}`, 1, 0),
+        )
+        this.chatContainer.addChild(
+          new Text(`│  ${dim(`Needs ${blocker.requiredCapability} — ${blocker.reason}`)}`, 1, 0),
+        )
+      }
+    }
+
     if (task.error) {
       this.chatContainer.addChild(new Text(dim('│'), 1, 0))
       this.chatContainer.addChild(
@@ -711,7 +726,7 @@ export class App {
     switch (status) {
       case 'queued': return '○'
       case 'running': return '●'
-      case 'waiting_permission': return '◐'
+      case 'blocked': return '!'
       case 'completed': return '✓'
       case 'failed': return '✗'
       default: return '■'
@@ -1689,6 +1704,7 @@ export class App {
     }
 
     this.agent.setPermissionMode(mode)
+    this.supervisor?.syncPermissionsToWorkers(true)
     this.showStatus(`Permission mode set to: ${mode}`)
   }
 
@@ -2486,7 +2502,7 @@ export class App {
 
     const dim = (s: string) => theme.dim(s)
     const accent = (s: string) => theme.fg('accent', s)
-    const active = new Set(['queued', 'running', 'waiting_permission'])
+    const active = new Set(['queued', 'running'])
 
     const add = (text: string) => {
       const w = new Text(text, 1, 0)

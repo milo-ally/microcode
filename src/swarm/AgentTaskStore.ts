@@ -5,11 +5,16 @@ import type {
 } from './types.ts'
 
 function cloneTask(task: AgentTask): AgentTask {
-  return { ...task, usage: { ...task.usage } }
+  return {
+    ...task,
+    blockers: (task.blockers ?? []).map((blocker) => ({ ...blocker })),
+    usage: { ...task.usage },
+  }
 }
 
 const TERMINAL_STATUSES: ReadonlySet<AgentTaskStatus> = new Set([
   'completed',
+  'blocked',
   'failed',
   'cancelled',
   'interrupted',
@@ -26,12 +31,14 @@ export class AgentTaskStore {
   create(
     request: SpawnAgentRequest,
     ids: { taskId: string; agentId: string },
+    batchId = 'legacy-batch',
   ): Readonly<AgentTask> {
     if (this.tasks.has(ids.taskId)) {
       throw new Error(`Agent task already exists: ${ids.taskId}`)
     }
     const task: AgentTask = {
       id: ids.taskId,
+      batchId,
       agentId: ids.agentId,
       parentAgentId: request.parentAgentId,
       description: request.description,
@@ -39,18 +46,22 @@ export class AgentTaskStore {
       role: request.role ?? 'worker',
       workKind: request.workKind ?? 'read',
       status: 'queued',
+      blockers: [],
       createdAt: Date.now(),
       usage: { tokens: 0, toolCalls: 0 },
     }
     this.tasks.set(task.id, task)
-    this.evict()
+    this.evict(new Set([batchId]))
     return cloneTask(task)
   }
 
-  private evict(): void {
+  private evict(protectedBatchIds: ReadonlySet<string>): void {
     if (this.tasks.size <= this.maxHistory) return
     const terminal = [...this.tasks.values()]
-      .filter((t) => TERMINAL_STATUSES.has(t.status))
+      .filter((task) =>
+        TERMINAL_STATUSES.has(task.status) &&
+        !protectedBatchIds.has(task.batchId)
+      )
       .sort((a, b) => a.createdAt - b.createdAt)
     const toRemove = this.tasks.size - this.maxHistory
     for (let i = 0; i < toRemove && i < terminal.length; i++) {
@@ -65,12 +76,14 @@ export class AgentTaskStore {
       if (
         task.status === 'queued' ||
         task.status === 'running' ||
-        task.status === 'waiting_permission'
+        (task.status as string) === 'waiting_permission'
       ) {
         task.status = 'interrupted'
         task.completedAt = Date.now()
         task.error = 'Interrupted when the previous session ended.'
       }
+      task.batchId ??= 'legacy-batch'
+      task.blockers ??= []
       this.tasks.set(task.id, task)
     }
   }
@@ -85,7 +98,9 @@ export class AgentTaskStore {
   }
 
   getByAgent(agentId: string): Readonly<AgentTask> | undefined {
-    const task = [...this.tasks.values()].find((item) => item.agentId === agentId)
+    const task = [...this.tasks.values()]
+      .filter((item) => item.agentId === agentId)
+      .sort((a, b) => b.createdAt - a.createdAt)[0]
     return task ? cloneTask(task) : undefined
   }
 
@@ -114,7 +129,7 @@ export class AgentTaskStore {
     return this.update(taskId, {
       status,
       startedAt: status === 'running' ? task.startedAt ?? now : task.startedAt,
-      completedAt: ['completed', 'failed', 'cancelled', 'interrupted'].includes(status)
+      completedAt: ['completed', 'blocked', 'failed', 'cancelled', 'interrupted'].includes(status)
         ? now
         : task.completedAt,
     })

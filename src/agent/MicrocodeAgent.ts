@@ -31,6 +31,9 @@ import { AgentSkillManager, type AgentSkillSnapshot } from './AgentSkillManager.
 import {
   PermissionManager,
   type PermissionBehavior,
+  type AgentCapability,
+  type EffectivePolicy,
+  type PermissionBlockDetails,
   type PermissionDecision,
   type PermissionMode,
   type PermissionRule,
@@ -93,6 +96,7 @@ export class MicrocodeAgent {
   private permissionRequestHandler?: AgentPermissionConfig['onPermissionRequest']
   private askUserQuestionHandler?: AgentPermissionConfig['onAskUserQuestion']
   private delegatePermissionRequestHandler?: AgentPermissionConfig['onDelegatePermissionRequest']
+  private permissionBlockedHandler?: AgentPermissionConfig['onPermissionBlocked']
 
   constructor(options: CreateMicrocodeAgentOptions = {}) {
     this.cwd = options.cwd ?? process.cwd()
@@ -102,8 +106,10 @@ export class MicrocodeAgent {
     this.permissionRequestHandler = options.permission?.onPermissionRequest
     this.askUserQuestionHandler = options.permission?.onAskUserQuestion
     this.delegatePermissionRequestHandler = options.permission?.onDelegatePermissionRequest
+    this.permissionBlockedHandler = options.permission?.onPermissionBlocked
     this.permissionManager = new PermissionManager({
       mode: options.permission?.mode,
+      capabilities: options.permission?.capabilities,
       allowedTools: options.permission?.allow,
       deniedTools: options.permission?.deny,
       askTools: options.permission?.ask,
@@ -118,7 +124,15 @@ export class MicrocodeAgent {
       onDelegatePermissionRequest: this.delegatePermissionRequestHandler
         ? (toolName, input, description) =>
             this.handlePermissionRequest('delegated', toolName, input, description)
-        : undefined,
+          : undefined,
+      onPermissionBlocked: async (blocker) => {
+        await this.emit({
+          type: 'permission_blocked',
+          agentId: this.identity.id,
+          blocker: Object.freeze({ ...blocker }),
+        })
+        await this.permissionBlockedHandler?.(blocker)
+      },
     })
 
     const modelConfig = options.modelId
@@ -273,6 +287,7 @@ export class MicrocodeAgent {
       isStreaming: state.isStreaming,
       pendingToolCallCount: state.pendingToolCalls.size,
       permission: this.permissionManager.getSnapshot(),
+      effectivePolicy: this.permissionManager.getEffectivePolicy(),
       tokens: this.getTokenStats(),
       errorMessage: state.errorMessage,
     })
@@ -441,6 +456,20 @@ export class MicrocodeAgent {
   setPermissionMode(mode: PermissionMode): void {
     this.permissionManager.setMode(mode)
     this.emitStateChangedDetached('permission_changed')
+  }
+
+  setCapabilities(capabilities: Iterable<AgentCapability>): void {
+    this.permissionManager.setCapabilities(capabilities)
+    this.emitStateChangedDetached('permission_changed')
+  }
+
+  setApprovedCapabilities(capabilities: Iterable<AgentCapability>): void {
+    this.permissionManager.setApprovedCapabilities(capabilities)
+    this.emitStateChangedDetached('permission_changed')
+  }
+
+  getEffectivePolicy(): Readonly<EffectivePolicy> {
+    return this.permissionManager.getEffectivePolicy()
   }
 
   getPermissionSnapshot(): Readonly<PermissionSnapshot> {

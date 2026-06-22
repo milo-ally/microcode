@@ -36,6 +36,7 @@ export function createGetAgentStatusTool(
             type: 'text',
             text: 'Stop polling. Agent results arrive automatically when all workers finish. Do not call this tool again.',
           }],
+          details: { agents: [] },
           isError: true,
         }
       }

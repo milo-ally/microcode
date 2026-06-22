@@ -16,6 +16,7 @@ import {
   createSendAgentMessageTool,
   createStopAgentTool,
   createGetAgentStatusTool,
+  createGrantAgentCapabilitiesTool,
 } from './tools/index.ts'
 import { type PermissionMode, PERMISSION_MODES } from './permissions/index.ts'
 import { cleanupImageCache } from './utils/imageUtils.ts'
@@ -449,18 +450,20 @@ Session Management:
       }
     },
   })
-  await supervisor.restore()
   const coordinatorId = agent.getId()
   agent.addTools([
     createSpawnAgentTool(supervisor, coordinatorId),
     createSendAgentMessageTool(supervisor, coordinatorId),
     createStopAgentTool(supervisor, coordinatorId),
     createGetAgentStatusTool(supervisor, coordinatorId),
+    createGrantAgentCapabilitiesTool(supervisor, coordinatorId),
   ])
-  agent.addSessionPermission('spawn_agent')
-  agent.addSessionPermission('send_agent_message')
-  agent.addSessionPermission('stop_agent')
-  agent.addSessionPermission('get_agent_status')
+  agent.addSessionPermission('spawn')
+  agent.addSessionPermission('message')
+  agent.addSessionPermission('stop')
+  agent.addSessionPermission('status')
+  agent.addSessionPermission('grant')
+  await supervisor.restore()
 
   // Create TUI app (REPL starts immediately)
   const app = new App(agent, mcpClient, sessionManager, supervisor)
