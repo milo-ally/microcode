@@ -1,0 +1,1 @@
+"""Universal web scraper CLI."""
