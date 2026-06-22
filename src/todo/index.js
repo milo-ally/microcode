@@ -42,7 +42,7 @@ switch (command) {
       usage();
       process.exit(1);
     }
-    const item = store.done(id);
+    const item = store.done(Number(id));
     render(item);
     break;
   }
