@@ -65,7 +65,8 @@ def cli():
 @click.option("--max-depth", type=int, default=2, help="Max recursion depth (default: 2)")
 @click.option("--timeout", type=int, default=30, help="Request timeout in seconds")
 @click.option("--user-agent", help="Custom User-Agent header")
-def scrape(url, selector, output, save, recursive, max_depth, timeout, user_agent):
+@click.option("-c", "--concurrency", type=int, default=5, help="Max concurrent requests (default: 5)")
+def scrape(url, selector, output, save, recursive, max_depth, timeout, user_agent, concurrency):
     """Scrape a web page and extract its content."""
     config = ScrapeConfig(
         url=url,
@@ -75,36 +76,30 @@ def scrape(url, selector, output, save, recursive, max_depth, timeout, user_agen
         max_depth=max_depth,
     )
 
-    scraper = Scraper(timeout=timeout, user_agent=user_agent)
+    scraper = Scraper(timeout=timeout, user_agent=user_agent, concurrency=concurrency)
     formatter = OUTPUT_FORMATS.get(output, output_text)
 
     with console.status(f"Scraping {url}...", spinner="dots") as status:
-        results = asyncio.run(
-            scraper.scrape_recursive(config) if recursive else asyncio.wrap_future(
-                asyncio.ensure_future(scraper.scrape(config))
-            )
-        )
+        if recursive:
+            results = asyncio.run(scraper.scrape_recursive(config))
+        else:
+            results = asyncio.run(scraper.scrape(config))
 
-    if isinstance(results, list):
-        for i, result in enumerate(results):
-            if i > 0:
-                console.print("\n" + "=" * 60 + "\n")
-            formatter(result)
-        if save:
-            path = Path(save)
-            with path.open("w", encoding="utf-8") as f:
-                for i, result in enumerate(results):
-                    if i > 0:
-                        f.write("\n" + "=" * 60 + "\n\n")
-                    formatter(result, file=f)
-            console.print(f"\n[green]✓ Saved to {save}[/]")
-    else:
-        formatter(results)
-        if save:
-            path = Path(save)
-            with path.open("w", encoding="utf-8") as f:
-                formatter(results, file=f)
-            console.print(f"\n[green]✓ Saved to {save}[/]")
+    if not isinstance(results, list):
+        results = [results]
+
+    for i, result in enumerate(results):
+        if i > 0:
+            console.print("\n" + "=" * 60 + "\n")
+        formatter(result)
+    if save:
+        path = Path(save)
+        with path.open("w", encoding="utf-8") as f:
+            for i, result in enumerate(results):
+                if i > 0:
+                    f.write("\n" + "=" * 60 + "\n\n")
+                formatter(result, file=f)
+        console.print(f"\n[green]✓ Saved to {save}[/]")
 
 
 @cli.command()
