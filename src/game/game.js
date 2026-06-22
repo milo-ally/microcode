@@ -51,6 +51,9 @@ export default class SnakeGame {
       dir: 'RIGHT',
       nextDir: 'RIGHT',
       food: this.randomFood([]),
+      ghostFood: this.randomFood([]),
+      ghostMode: false,
+      ghostTimer: 0,
       score: 0,
       speed: 150,
       gameOver: false,
@@ -108,6 +111,15 @@ export default class SnakeGame {
       this.move();
     }
 
+    // Decrement ghost timer by delta time (approximate with frame time)
+    if (this.state.ghostMode) {
+      this.state.ghostTimer -= 1 / 60;
+      if (this.state.ghostTimer <= 0) {
+        this.state.ghostMode = false;
+        this.state.ghostTimer = 0;
+      }
+    }
+
     this.draw();
     this.raf = requestAnimationFrame(this.loop);
   }
@@ -131,8 +143,9 @@ export default class SnakeGame {
 
     // Self collision (skip tail if no food eaten — it will move away)
     const willEat = s.food && newHead.x === s.food.x && newHead.y === s.food.y;
-    const bodyToCheck = willEat ? s.snake : s.snake.slice(0, -1);
-    if (bodyToCheck.some((seg) => seg.x === newHead.x && seg.y === newHead.y)) {
+    const willEatGhost = s.ghostFood && newHead.x === s.ghostFood.x && newHead.y === s.ghostFood.y;
+    const bodyToCheck = (willEat || willEatGhost) ? s.snake : s.snake.slice(0, -1);
+    if (!s.ghostMode && bodyToCheck.some((seg) => seg.x === newHead.x && seg.y === newHead.y)) {
       s.gameOver = true;
       return;
     }
@@ -144,6 +157,10 @@ export default class SnakeGame {
       this.updateScore();
       s.speed = Math.max(50, s.speed - 10);
       s.food = this.randomFood(s.snake);
+    } else if (willEatGhost) {
+      s.ghostMode = true;
+      s.ghostTimer = 5;
+      s.ghostFood = this.randomFood(s.snake);
     } else {
       s.snake.pop();
     }
@@ -177,7 +194,11 @@ export default class SnakeGame {
 
     // Snake
     this.state.snake.forEach((seg, i) => {
-      ctx.fillStyle = i === 0 ? '#4f4' : '#2a2';
+      if (this.state.ghostMode) {
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      } else {
+        ctx.fillStyle = i === 0 ? '#4f4' : '#2a2';
+      }
       ctx.fillRect(seg.x * CELL_SIZE + 1, seg.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
     });
 
@@ -210,6 +231,21 @@ export default class SnakeGame {
       );
     }
 
+    // Ghost food (gold diamond)
+    if (this.state.ghostFood) {
+      const gx = this.state.ghostFood.x * CELL_SIZE + CELL_SIZE / 2;
+      const gy = this.state.ghostFood.y * CELL_SIZE + CELL_SIZE / 2;
+      const r = CELL_SIZE / 2 - 3;
+      ctx.fillStyle = '#ff0';
+      ctx.beginPath();
+      ctx.moveTo(gx, gy - r);
+      ctx.lineTo(gx + r, gy);
+      ctx.lineTo(gx, gy + r);
+      ctx.lineTo(gx - r, gy);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     // Game over overlay
     if (this.state.gameOver) {
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -235,6 +271,14 @@ export default class SnakeGame {
         ctx.textAlign = 'right';
         ctx.textBaseline = 'top';
         ctx.fillText('WRAP', CANVAS_SIZE - 6, 6);
+      }
+
+      if (this.state.ghostMode) {
+        ctx.fillStyle = 'rgba(255,255,0,0.8)';
+        ctx.font = 'bold 16px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`GHOST: ${this.state.ghostTimer.toFixed(1)}s`, CANVAS_SIZE / 2, 6);
       }
     }
   }
