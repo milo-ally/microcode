@@ -27,7 +27,7 @@ export function createSpawnAgentTool(
   return {
     name: TOOL_NAME,
     label: 'Spawn agent',
-    description: 'Launch an asynchronous worker for a substantial delegated task.',
+    description: 'Launch a new asynchronous worker for a substantial delegated task.',
     parameters: spawnSchema,
     async execute(_id, input: Static<typeof spawnSchema>) {
       const task = await supervisor.spawn({

@@ -22,7 +22,7 @@ export function createSendAgentMessageTool(
   return {
     name: TOOL_NAME,
     label: 'Message agent',
-    description: 'Send a follow-up instruction to an existing worker.',
+    description: 'Wake up an existing worker agent and send a follow-up instruction to it. ',
     parameters: sendSchema,
     async execute(_id, input: Static<typeof sendSchema>) {
       await supervisor.send(input.agent_id, input.message)
