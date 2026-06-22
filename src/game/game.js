@@ -54,6 +54,7 @@ export default class SnakeGame {
       score: 0,
       speed: 150,
       gameOver: false,
+      wrapMode: false,
     };
   }
 
@@ -70,6 +71,17 @@ export default class SnakeGame {
   }
 
   onKey(e) {
+    if (e.key === 'W' || e.key === 'w') {
+      e.preventDefault();
+      this.state.wrapMode = !this.state.wrapMode;
+      if (this.state.wrapMode) {
+        this.canvas.style.borderColor = '#0ff';
+      } else {
+        this.canvas.style.borderColor = '#333';
+      }
+      return;
+    }
+
     const keyMap = {
       ArrowUp: 'UP',
       ArrowDown: 'DOWN',
@@ -108,8 +120,13 @@ export default class SnakeGame {
 
     // Wall collision
     if (newHead.x < 0 || newHead.x >= GRID_SIZE || newHead.y < 0 || newHead.y >= GRID_SIZE) {
-      s.gameOver = true;
-      return;
+      if (s.wrapMode) {
+        newHead.x = (newHead.x + GRID_SIZE) % GRID_SIZE;
+        newHead.y = (newHead.y + GRID_SIZE) % GRID_SIZE;
+      } else {
+        s.gameOver = true;
+        return;
+      }
     }
 
     // Self collision (skip tail if no food eaten — it will move away)
@@ -210,6 +227,14 @@ export default class SnakeGame {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.fillText(`Score: ${this.state.score}`, 6, 6);
+
+      if (this.state.wrapMode) {
+        ctx.fillStyle = 'rgba(0,255,255,0.6)';
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        ctx.fillText('WRAP', CANVAS_SIZE - 6, 6);
+      }
     }
   }
 
