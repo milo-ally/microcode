@@ -53,7 +53,7 @@ switch (command) {
       usage();
       process.exit(1);
     }
-    const item = store.delete(id);
+    const item = store.delete(Number(id));
     render(item);
     break;
   }

@@ -56,7 +56,8 @@ export class TodoList {
   delete(id) {
     const index = this.todos.findIndex(t => t.id === id);
     if (index === -1) throw new Error('Not found');
-    this.todos.splice(index, 1);
+    const [removed] = this.todos.splice(index, 1);
     this.save();
+    return removed;
   }
 }

@@ -20,4 +20,4 @@ function render(result) {
   console.log(renderItem(result));
 }
 
-module.exports = { render };
+export { render };
