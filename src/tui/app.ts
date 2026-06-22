@@ -121,6 +121,8 @@ export class App {
   private supervisor?: AgentSupervisor
   private agentTreeWidgets: Text[] = []
   private agentTreeTimer: ReturnType<typeof setInterval> | null = null
+  private agentTreeWorkingText: Text | null = null
+  private agentTreeFrameIndex = 0
   onExit?: () => void | Promise<void>
 
   constructor(
@@ -2602,46 +2604,51 @@ export class App {
   }
 
   private updateAgentTree(): void {
-    // Clear previous tree
-    for (const w of this.agentTreeWidgets) {
-      this.statusContainer.removeChild(w)
+    const dim = (s: string) => theme.dim(s)
+    const accent = (s: string) => theme.fg('accent', s)
+    const active = new Set(['queued', 'running'])
+
+    // ── Coordinator "Working..." line — update in-place ──
+    if (this.coordinatorWorking) {
+      // Advance spinner frame smoothly — matches the 80ms tick rate
+      this.agentTreeFrameIndex++
+      const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+      const frame = frames[Math.floor(this.agentTreeFrameIndex / 2) % frames.length]
+      const label = `${accent(frame)} Working...`
+      if (this.agentTreeWorkingText) {
+        this.agentTreeWorkingText.setText(label)
+      } else {
+        this.agentTreeWorkingText = new Text(label, 1, 0)
+        this.statusContainer.addChild(this.agentTreeWorkingText)
+        this.agentTreeWidgets.push(this.agentTreeWorkingText)
+      }
+    } else if (this.agentTreeWorkingText) {
+      this.statusContainer.removeChild(this.agentTreeWorkingText)
+      this.agentTreeWidgets = this.agentTreeWidgets.filter((w) => w !== this.agentTreeWorkingText)
+      this.agentTreeWorkingText = null
+      this.agentTreeFrameIndex = 0
     }
-    this.agentTreeWidgets = []
 
     if (!this.supervisor) return
     const states = this.supervisor.listAgents()
     if (states.length === 0 && !this.coordinatorWorking) return
 
-    const dim = (s: string) => theme.dim(s)
-    const accent = (s: string) => theme.fg('accent', s)
-    const active = new Set(['queued', 'running'])
-
-    const add = (text: string) => {
-      const w = new Text(text, 1, 0)
-      this.agentTreeWidgets.push(w)
-      this.statusContainer.addChild(w)
-    }
-
-    const toolIcon = (e: { done: boolean; error: boolean }) =>
-      !e.done ? accent('●') : e.error ? theme.fg('red', '✗') : theme.fg('green', '✓')
-
+    // ── Build the agent status lines ──
     const now = Date.now()
     const fmtElapsed = (ms: number) => {
       const totalSecs = ms / 1000
-      if (totalSecs < 1) return `${totalSecs.toFixed(3)}s`
+      if (totalSecs < 1) return `${totalSecs.toFixed(1)}s`
       if (totalSecs < 60) return `${Math.floor(totalSecs)}s`
       const mins = Math.floor(totalSecs / 60)
       const secs = Math.floor(totalSecs % 60)
       return `${mins}m ${secs}s`
     }
 
-    if (this.coordinatorWorking) {
-      const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-      const frame = frames[Math.floor(now / 120) % frames.length]
-      add(`${theme.fg('accent', frame)} Working...`)
-    }
+    const toolIcon = (e: { done: boolean; error: boolean }) =>
+      !e.done ? accent('●') : e.error ? theme.fg('red', '✗') : theme.fg('green', '✓')
 
-    add(dim('─ Agents ─'))
+    const lines: string[] = []
+    lines.push(dim('─ Agents ─'))
 
     const activeStates = states.filter((s) => active.has(s.task.status))
     const terminalStates = states
@@ -2654,20 +2661,20 @@ export class App {
       const branch = isLastActive ? '└─' : '├─'
       const elapsed = task.startedAt ? now - task.startedAt : 0
       const sub = task.status === 'queued' ? 'waiting' : activity || 'running'
-      add(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}  ${dim(fmtElapsed(elapsed))} · ${dim(sub)}`)
+      lines.push(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}  ${dim(fmtElapsed(elapsed))} · ${dim(sub)}`)
 
       const prefix = isLastActive ? '   ' : '│  '
       const tools = toolHistory.slice(-4)
       for (let j = 0; j < tools.length; j++) {
         const tool = tools[j]
         const lastTool = j === tools.length - 1
-        const statusStr = !tool.done && tool.status ? ` ${theme.fg('accent', tool.status)}` : ''
+        const statusStr = !tool.done && tool.status ? ` ${accent(tool.status)}` : ''
         const detail = tool.detail ? ` ${dim(tool.detail)}` : ''
         const elapsed = !tool.done && tool.startedAt ? ` ${dim(fmtElapsed(now - tool.startedAt))}` : ''
-        add(`${prefix}${lastTool ? '└─' : '├─'} ${toolIcon(tool)} ${tool.name}${statusStr}${detail}${elapsed}`)
+        lines.push(`${prefix}${lastTool ? '└─' : '├─'} ${toolIcon(tool)} ${tool.name}${statusStr}${detail}${elapsed}`)
       }
       if (toolHistory.length > 4) {
-        add(`${prefix}   ${dim(`…${toolHistory.length - 4} more`)}`)
+        lines.push(`${prefix}   ${dim(`…${toolHistory.length - 4} more`)}`)
       }
     }
 
@@ -2679,15 +2686,44 @@ export class App {
       const summary = tools.length > 0
         ? ` ${toolIcon(tools[0])} ${tools[0].name}${tools[0].detail ? ` ${dim(tools[0].detail)}` : ''}${toolHistory.length > 1 ? `  (${toolHistory.length})` : ''}`
         : ''
-      add(dim(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}${summary}`))
+      lines.push(dim(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}${summary}`))
     }
 
-    if ((activeStates.length > 0 || this.coordinatorWorking) && !this.agentTreeTimer) {
+    // ── Diff update: reconcile generated lines with existing widgets ──
+    // Status line widgets start after the working text (index 1 of agentTreeWidgets)
+    const statusStartIndex = this.coordinatorWorking ? 1 : 0
+    const statusWidgets = this.agentTreeWidgets.slice(statusStartIndex)
+
+    // Add/update widgets for each line
+    for (let i = 0; i < lines.length; i++) {
+      if (i < statusWidgets.length) {
+        // Update existing widget
+        statusWidgets[i].setText(lines[i])
+      } else {
+        // Create new widget
+        const w = new Text(lines[i], 1, 0)
+        this.statusContainer.addChild(w)
+        this.agentTreeWidgets.push(w)
+      }
+    }
+
+    // Remove excess widgets
+    while (statusWidgets.length > lines.length) {
+      const w = statusWidgets.pop()!
+      this.statusContainer.removeChild(w)
+      const idx = this.agentTreeWidgets.indexOf(w)
+      if (idx !== -1) this.agentTreeWidgets.splice(idx, 1)
+    }
+
+    // ── Start/stop the animation timer ──
+    const hasActive = activeStates.length > 0 || this.coordinatorWorking
+    if (hasActive && !this.agentTreeTimer) {
+      // 80ms ≈ 60fps, smoothly animates the spinner
       this.agentTreeTimer = setInterval(() => {
         this.updateAgentTree()
         this.ui.requestRender()
-      }, 250)
-    } else if (activeStates.length === 0 && !this.coordinatorWorking && this.agentTreeTimer) {
+      }, 80)
+    } else if (!hasActive && this.agentTreeTimer) {
       clearInterval(this.agentTreeTimer)
       this.agentTreeTimer = null
     }
@@ -2902,6 +2938,10 @@ export class App {
     if (this.agentTreeTimer) {
       clearInterval(this.agentTreeTimer)
       this.agentTreeTimer = null
+    }
+    if (this.agentTreeWorkingText) {
+      this.statusContainer.removeChild(this.agentTreeWorkingText)
+      this.agentTreeWorkingText = null
     }
     this.ui.stop()
   }
