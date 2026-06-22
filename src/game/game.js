@@ -52,6 +52,7 @@ export default class SnakeGame {
       nextDir: 'RIGHT',
       food: this.randomFood([]),
       score: 0,
+      speed: 150,
       gameOver: false,
     };
   }
@@ -89,7 +90,7 @@ export default class SnakeGame {
       return;
     }
 
-    if (timestamp - this.lastMove >= MOVE_INTERVAL) {
+    if (timestamp - this.lastMove >= this.state.speed) {
       this.lastMove = timestamp;
       this.state.dir = this.state.nextDir;
       this.move();
@@ -124,6 +125,7 @@ export default class SnakeGame {
     if (willEat) {
       s.score++;
       this.updateScore();
+      s.speed = Math.max(50, s.speed - 10);
       s.food = this.randomFood(s.snake);
     } else {
       s.snake.pop();
