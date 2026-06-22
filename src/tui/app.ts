@@ -2597,22 +2597,15 @@ export class App {
       }
     }
 
-    // Recent completed (up to 2)
-    const shown = terminalStates.slice(0, 2)
-    for (let i = 0; i < shown.length; i++) {
-      const { task, toolHistory } = shown[i]
-      const last = i === shown.length - 1
+    for (let i = 0; i < terminalStates.length; i++) {
+      const { task, toolHistory } = terminalStates[i]
+      const last = i === terminalStates.length - 1 && activeStates.length === 0
       const branch = last ? '└─' : '├─'
       const tools = toolHistory.slice(-1)
       const summary = tools.length > 0
         ? ` ${toolIcon(tools[0])} ${tools[0].name}${tools[0].detail ? ` ${dim(tools[0].detail)}` : ''}${toolHistory.length > 1 ? `  (${toolHistory.length})` : ''}`
         : ''
       add(dim(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}${summary}`))
-    }
-
-    const hidden = terminalStates.length - 2
-    if (hidden > 0) {
-      add(dim(`   …and ${hidden} more`))
     }
   }
 
