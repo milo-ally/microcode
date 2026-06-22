@@ -778,9 +778,8 @@ export class App {
   }
 
   private handleStatusCommand(): void {
-    const model = this.agent.getCurrentModel()
     const tokenStats = this.agent.getTokenStats()
-    const { context: usage, session } = tokenStats
+    const { context: usage } = tokenStats
 
     const formatTokens = (value: number): string => value.toLocaleString('en-US')
     const formatPrice = (value: number): string => {
@@ -788,8 +787,6 @@ export class App {
       if (value < 0.0001) return `$${value.toFixed(6)}`
       return `$${value.toFixed(4)}`
     }
-    const formatRate = (value: number): string => `$${value.toLocaleString('en-US', { maximumFractionDigits: 6 })}`
-    const yesNo = (value: boolean): string => value ? 'yes' : 'no'
 
     const lines: string[] = [
       theme.fg('accent', 'Status'),
@@ -808,44 +805,42 @@ export class App {
       `  Breakdown  system ${formatTokens(usage.systemPromptTokens)} + messages ${formatTokens(usage.messageTokens)}`,
     )
 
-    lines.push(
-      '',
-      theme.bold('Session API usage'),
-      `  Requests    ${formatTokens(session.requests)}`,
-      `  Input       ${formatTokens(session.inputTokens)} tokens`,
-      `  Output      ${formatTokens(session.outputTokens)} tokens`,
-      `  Cache       ${formatTokens(session.cacheReadTokens)} read / ${formatTokens(session.cacheWriteTokens)} write`,
-      `  Total       ${formatTokens(session.totalTokens)} reported tokens`,
-      `  Cost        ${formatPrice(session.totalCost)}`,
-      '',
-      theme.bold('Model'),
-      `  Name        ${model.name ?? model.id}`,
-      `  ID          ${model.id}`,
-      `  Provider    ${model.provider}`,
-      `  API         ${model.api}`,
-      `  Base URL    ${model.baseUrl}`,
-      `  Context     ${formatTokens(model.contextWindow)} tokens`,
-      `  Max output  ${formatTokens(model.maxTokens)} tokens`,
-      `  Reasoning   ${yesNo(model.reasoning)}${model.reasoning ? ` (current: ${this.agent.getThinkingLevel()})` : ''}`,
-      `  Input       ${model.input.join(', ')}`,
-      `  API key     ${this.agent.getApiKey() ? 'configured' : 'not configured'}`,
-      '',
-      theme.bold('Pricing per 1M tokens'),
-      `  Input       ${formatRate(model.cost.input)}`,
-      `  Output      ${formatRate(model.cost.output)}`,
-      `  Cache read  ${formatRate(model.cost.cacheRead)}`,
-      `  Cache write ${formatRate(model.cost.cacheWrite)}`,
-      '',
-      theme.dim('Context values are local estimates; session usage and cost are reported by the provider.'),
-    )
+    // Aggregate byModel across all agents (coordinator + sub-agents)
+    const mergedByModel: Record<string, { modelId: string; provider: string; api: string; requests: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; totalCost: number }> = {}
 
-    const modelUsages = Object.values(tokenStats.byModel)
+    const mergeStats = (stats: Readonly<import('../agent/AgentTokenTracker.js').AgentTokenSnapshot>) => {
+      for (const [key, mu] of Object.entries(stats.byModel)) {
+        const existing = mergedByModel[key]
+        if (existing) {
+          existing.requests += mu.requests
+          existing.inputTokens += mu.inputTokens
+          existing.outputTokens += mu.outputTokens
+          existing.cacheReadTokens += mu.cacheReadTokens
+          existing.cacheWriteTokens += mu.cacheWriteTokens
+          existing.totalTokens += mu.totalTokens
+          existing.totalCost += mu.totalCost
+        } else {
+          mergedByModel[key] = { ...mu }
+        }
+      }
+    }
+
+    mergeStats(tokenStats)
+
+    if (this.supervisor) {
+      for (const { task } of this.supervisor.listAgents()) {
+        const handle = this.supervisor.registry.get(task.agentId)
+        if (handle) mergeStats(handle.getTokenStats())
+      }
+    }
+
+    const modelUsages = Object.values(mergedByModel)
     if (modelUsages.length > 0) {
       lines.push('', theme.bold('Usage by model'))
-      for (const modelUsage of modelUsages) {
+      for (const mu of modelUsages) {
         lines.push(
-          `  ${modelUsage.modelId} (${modelUsage.provider}, ${modelUsage.api})`,
-          `    ${formatTokens(modelUsage.requests)} requests · ${formatTokens(modelUsage.totalTokens)} tokens · ${formatPrice(modelUsage.totalCost)}`,
+          `  ${mu.modelId} (${mu.provider}, ${mu.api})`,
+          `    ${formatTokens(mu.requests)} requests · ${formatTokens(mu.totalTokens)} tokens · ${formatPrice(mu.totalCost)}`,
         )
       }
     }
