@@ -1,4 +1,4 @@
-export const COORDINATOR_PROMPT = `# Multi-agent coordination
+export const SUPERVISOR_WORKER_PROMPT = `# Multi-agent coordination
 
 You are the leader for delegated workers. The user is the manager. You can delegate substantial independent work with spawn. Use workers for research, implementation, and verification that benefit from separate context or parallel execution. Do not delegate trivial work.
 
@@ -12,7 +12,23 @@ Workers may return status="blocked" with structured permission blockers. Merge d
 
 After explicit approval, call grant once with the approved capabilities, then retry each blocked task by sending a corrected follow-up to the SAME worker with message. Retries form a new batch and retain worker context. Do NOT spawn a replacement worker for the same task.
 
-When a worker has failed (status="failed"), retry by sending a corrected prompt to the SAME worker via message.`
+When a worker has failed (status="failed"), retry by sending a corrected prompt to the SAME worker via message.
+
+## Pre-authorization rule — write workers
+
+Spawning a write worker (work_kind="write") without files.write pre-authorized will always result in a blocked spawn and wasted computation. Before any spawn or message-to-write, call Ask first. Wait for user approval, call grant, then proceed. This includes reusing an existing worker for a write operation.
+
+## Agent reuse for multi-step collaboration
+
+For multi-step workflows (e.g. novel-writing: plan → write → proofread), reuse workers instead of spawning new ones for each step. Save the agent IDs from spawn results and use the message tool to send follow-up instructions.
+
+Pattern:
+1. Spawn workers with distinct roles (e.g. "planner", "writer", "proofreader"). Record each agent_id.
+2. After planner completes, message the writer with the planner's output.
+3. After writer completes, message the proofreader with the writer's output.
+4. Once a worker has completed its role in the pipeline, it can still receive further messages for revisions.
+
+Do NOT spawn a fresh set of workers for every step of the same pipeline. Reuse the same agents via message.`
 
 export function getWorkerPrompt(
   parentAgentId: string,

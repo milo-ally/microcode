@@ -9,7 +9,7 @@ import type { McpServerConfig } from './mcp/types.ts'
 import { SessionManager } from './session/SessionManager.ts'
 import {
   AgentSupervisor,
-  COORDINATOR_PROMPT,
+  SUPERVISOR_WORKER_PROMPT,
 } from './swarm/index.ts'
 import {
   createSpawnAgentTool,
@@ -428,7 +428,7 @@ Session Management:
       name: 'Coordinator',
       role: 'coordinator',
     },
-    systemPromptSuffix: COORDINATOR_PROMPT,
+    systemPromptSuffix: SUPERVISOR_WORKER_PROMPT,
   })
   // Restore messages if resuming
   if (restoredMessages && restoredMessages.length > 0) {
