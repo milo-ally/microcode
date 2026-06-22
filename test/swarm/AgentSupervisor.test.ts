@@ -164,7 +164,7 @@ describe('AgentSupervisor', () => {
     await supervisor.shutdown()
   })
 
-  test('enforces max concurrency and one running writer', async () => {
+  test('all agents run in parallel (no write serialization)', async () => {
     const parent = coordinator()
     const streams: AssistantMessageEventStream[] = []
     const supervisor = new AgentSupervisor({
@@ -206,15 +206,18 @@ describe('AgentSupervisor', () => {
       prompt: 'read',
       tools: ['read'],
     })
-    await waitFor(() => streams.length === 2)
+    // All three should start immediately — no write serialization.
+    await waitFor(() => streams.length >= 3)
     expect(supervisor.getTask(first.id)?.status).toBe('running')
-    expect(supervisor.getTask(second.id)?.status).toBe('queued')
+    expect(supervisor.getTask(second.id)?.status).toBe('running')
     expect(supervisor.getTask(reader.id)?.status).toBe('running')
 
     const done = response('done')
-    streams[0]!.push({ type: 'start', partial: done })
-    streams[0]!.push({ type: 'done', reason: 'stop', message: done })
-    await waitFor(() => supervisor.getTask(second.id)?.status === 'running')
+    for (const stream of streams.slice(0, 2)) {
+      stream.push({ type: 'start', partial: done })
+      stream.push({ type: 'done', reason: 'stop', message: done })
+    }
+    await waitFor(() => supervisor.getTask(first.id)?.status === 'completed')
     expect(supervisor.getRunningCount()).toBeLessThanOrEqual(3)
 
     for (const stream of streams.slice(1)) {

@@ -3,8 +3,6 @@ import { getWorkerPrompt } from '../prompt/prompts.ts'
 import type { AgentFactoryContext } from './types.ts'
 
 import { TOOL_NAME as READ_TOOL_NAME } from '../tools/FileReadTool/FileReadTool.ts'
-import { TOOL_NAME as EDIT_TOOL_NAME } from '../tools/FileEditTool/FileEditTool.ts'
-import { TOOL_NAME as WRITE_TOOL_NAME } from '../tools/FileWriteTool/FileWriteTool.ts'
 import { TOOL_NAME as GREP_TOOL_NAME } from '../tools/GrepTool/GrepTool.ts'
 import { TOOL_NAME as GLOB_TOOL_NAME } from '../tools/GlobTool/GlobTool.ts'
 import { TOOL_NAME as VISION_TOOL_NAME } from '../tools/VisionTool/VisionTool.ts'
@@ -35,14 +33,8 @@ const DEFAULT_TOOLS = [
   TOOL_SEARCH_TOOL_NAME,
 ]
 
-const WRITE_TOOL_NAMES = new Set([EDIT_TOOL_NAME, WRITE_TOOL_NAME])
-
 export function getDefaultWorkerTools(): string[] {
   return [...DEFAULT_TOOLS]
-}
-
-export function isWriteWorker(worker: MicrocodeAgent): boolean {
-  return worker.getSnapshot().toolNames.some((name) => WRITE_TOOL_NAMES.has(name))
 }
 
 export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent {

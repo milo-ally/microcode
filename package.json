@@ -26,6 +26,7 @@
     "chalk": "^5.5.0",
     "diff": "^9.0.0",
     "marked": "^15.0.12",
+    "simple-git": "^3.36.0",
     "typebox": "^1.1.24"
   },
   "devDependencies": {

@@ -3,8 +3,9 @@ import type { AssistantMessage } from '@earendil-works/pi-ai'
 import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
 import { AgentRegistry } from './AgentRegistry.ts'
 import { AgentTaskStore } from './AgentTaskStore.ts'
-import { createWorkerAgent, isWriteWorker } from './AgentFactory.ts'
+import { createWorkerAgent } from './AgentFactory.ts'
 import type { PermissionMode as _PermissionMode } from '../permissions/index.ts'
+import type { GitWorktreeSystem } from '../git/GitWorktreeSystem.ts'
 import type {
   AgentBatch,
   AgentMeta,
@@ -213,6 +214,7 @@ export interface AgentSupervisorOptions {
   persistence?: AgentTranscriptPersistence
   createWorker?: typeof createWorkerAgent
   configureWorker?: (worker: MicrocodeAgent) => void
+  worktreeSystem?: GitWorktreeSystem
 }
 
 export class AgentSupervisor {
@@ -224,6 +226,7 @@ export class AgentSupervisor {
   private readonly persistence?: AgentTranscriptPersistence
   private readonly workerFactory: typeof createWorkerAgent
   private readonly configureWorker?: (worker: MicrocodeAgent) => void
+  private readonly worktreeSystem?: GitWorktreeSystem
   private readonly listeners = new Set<SwarmUIEventListener>()
   private readonly queue: string[] = []
   private readonly activities = new Map<string, string>()
@@ -246,6 +249,7 @@ export class AgentSupervisor {
     this.persistence = options.persistence
     this.workerFactory = options.createWorker ?? createWorkerAgent
     this.configureWorker = options.configureWorker
+    this.worktreeSystem = options.worktreeSystem
     this.registry.register(this.coordinator)
     this.attachCoordinator()
   }
@@ -435,9 +439,22 @@ export class AgentSupervisor {
       agentId: createId('agent'),
     }, batch.id)
     batch.taskIds.push(task.id)
+
+    // Create git worktree for isolated parallel execution.
+    let worktreeCwd: string | undefined
+    if (this.worktreeSystem) {
+      try {
+        const state = await this.worktreeSystem.createWorktree(task.agentId)
+        worktreeCwd = state.path
+      } catch {
+        // Worktree creation failed — proceed without isolation.
+      }
+    }
+
+    const effectiveRequest = worktreeCwd ? { ...request, cwd: worktreeCwd } : request
     const worker = this.workerFactory({
       parent: this.coordinator,
-      request,
+      request: effectiveRequest,
       agentId: task.agentId,
       persistence: this.persistence,
     })
@@ -535,6 +552,9 @@ export class AgentSupervisor {
     for (const task of targets) {
       this.emit({ type: 'agent_status_changed', task: this.tasks.get(task.id)! })
       await this.finishTask(task)
+      if (this.worktreeSystem) {
+        void this.worktreeSystem.cleanupWorktree(task.agentId).catch(() => {})
+      }
     }
   }
 
@@ -548,6 +568,9 @@ export class AgentSupervisor {
     for (const task of active) {
       this.registry.get(task.agentId)?.abort()
       this.clearTimer(task.id)
+      if (this.worktreeSystem) {
+        void this.worktreeSystem.cleanupWorktree(task.agentId).catch(() => {})
+      }
       this.tasks.update(task.id, {
         status: 'interrupted',
         error: 'Interrupted during shutdown.',
@@ -576,19 +599,8 @@ export class AgentSupervisor {
   private drainQueue(): void {
     if (this.shuttingDown) return
     while (this.getRunningCount() < this.maxWorkers) {
-      const index = this.queue.findIndex((taskId) => {
-        const task = this.tasks.get(taskId)
-        const worker = task ? this.registry.get(task.agentId) : undefined
-        if (!task || !worker) return false
-        if (!isWriteWorker(worker)) return true
-        return !this.tasks.list().some((other) => {
-          if (other.id === task.id || other.status !== 'running') return false
-          const w = this.registry.get(other.agentId)
-          return w ? isWriteWorker(w) : false
-        })
-      })
-      if (index === -1) return
-      const [taskId] = this.queue.splice(index, 1)
+      const taskId = this.queue.shift()
+      if (!taskId) return
       const task = this.tasks.get(taskId)
       const worker = task ? this.registry.get(task.agentId) : undefined
       if (!task || !worker || task.status !== 'queued') continue
@@ -612,6 +624,9 @@ export class AgentSupervisor {
       const current = this.tasks.get(taskId)
       if (!current || current.status !== 'running') return
       worker.abort()
+      if (this.worktreeSystem) {
+        void this.worktreeSystem.cleanupWorktree(taskId).catch(() => {})
+      }
       const failed = this.tasks.update(taskId, {
         status: 'failed',
         error: `Timed out after ${this.timeoutMs}ms.`,
@@ -641,6 +656,16 @@ export class AgentSupervisor {
         this.emit({ type: 'agent_failed', task: failed })
         await this.finishTask(failed)
       } else {
+        // Auto-commit and merge worktree on success.
+        if (this.worktreeSystem) {
+          try {
+            const desc = this.tasks.get(taskId)?.description ?? 'agent'
+            await this.worktreeSystem.commitWorktree(taskId, `${desc} (${taskId.slice(0, 8)})`)
+            await this.worktreeSystem.mergeWorktree(taskId)
+          } catch {
+            // Merge conflict or commit failure — report but don't block.
+          }
+        }
         const blockers = this.tasks.get(taskId)?.blockers ?? []
         const completed = this.tasks.update(taskId, {
           status: blockers.length > 0 ? 'blocked' : 'completed',
@@ -665,6 +690,10 @@ export class AgentSupervisor {
       this.emit({ type: 'agent_failed', task: failed })
       await this.finishTask(failed)
     } finally {
+      // Cleanup worktree regardless of outcome.
+      if (this.worktreeSystem) {
+        void this.worktreeSystem.cleanupWorktree(taskId).catch(() => {})
+      }
       this.clearTimer(taskId)
       this.drainQueue()
     }
