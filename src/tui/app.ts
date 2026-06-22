@@ -2381,6 +2381,25 @@ export class App {
 
   private handleEditorSubmit(text: string): void {
     this.editor.addToHistory(text)
+
+    // Agent is busy — no one is listening for input yet. Handle slash commands
+    // inline, or tell the user the agent is busy.
+    if (!this._inputResolve && this.isAgentBusy()) {
+      if (text.startsWith('/')) {
+        this.handleSlashCommand(text.trim())
+        this.ui.requestRender()
+        return
+      }
+      if (text.startsWith('!')) {
+        this.showStatus('Agent is busy — press Esc or Ctrl+C to cancel, then run the command.')
+        return
+      }
+      this.showStatus(
+        `Agent is busy — press Esc or Ctrl+C to cancel. Type /help for available commands.`,
+      )
+      return
+    }
+
     this._pendingInput = text
     this._inputResolve?.()
   }
