@@ -8,11 +8,11 @@
 // @ts-nocheck
 
 import { registerTool } from '../registry.ts'
-import { createAskUserQuestionTool, TOOL_DEFAULT_PERMISSION } from './AskUserQuestionTool.ts'
+import { createAskUserQuestionTool, TOOL_DEFAULT_PERMISSION, ASK_USER_QUESTION_TOOL_NAME } from './AskUserQuestionTool.ts'
 import { AskUserQuestionToolUI } from './UI.tsx'
 
 registerTool({
-  name: 'Ask',
+  name: ASK_USER_QUESTION_TOOL_NAME,
   defaultPermission: TOOL_DEFAULT_PERMISSION,
   createTool: createAskUserQuestionTool, 
   ui: AskUserQuestionToolUI,

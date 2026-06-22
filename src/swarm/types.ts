@@ -1,10 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { MicrocodeAgent } from '../agent/index.ts'
 import type { PermissionMode } from '../permissions/index.ts'
-import type {
-  AgentCapability,
-  PermissionBlockDetails,
-} from '../permissions/index.ts'
 
 export type AgentTaskStatus =
   | 'queued'
@@ -15,8 +11,10 @@ export type AgentTaskStatus =
   | 'cancelled'
   | 'interrupted'
 
-export type AgentWorkKind = 'read' | 'write'
-export type AgentBlocker = PermissionBlockDetails
+export interface AgentBlocker {
+  toolName: string
+  reason: string
+}
 
 export interface AgentBatch {
   id: string
@@ -35,7 +33,6 @@ export interface AgentTask {
   description: string
   prompt: string
   role: string
-  workKind: AgentWorkKind
   status: AgentTaskStatus
   result?: string
   blockers: AgentBlocker[]
@@ -56,9 +53,7 @@ export interface SpawnAgentRequest {
   role?: string
   modelId?: string
   cwd?: string
-  permissionMode?: PermissionMode
-  capabilities?: AgentCapability[]
-  workKind?: AgentWorkKind
+  tools?: string[]
 }
 
 export interface AgentRuntimeState {
@@ -75,26 +70,32 @@ export type SwarmUIEvent =
   | { type: 'agent_completed'; task: Readonly<AgentTask> }
   | { type: 'agent_blocked'; task: Readonly<AgentTask> }
   | { type: 'agent_failed'; task: Readonly<AgentTask> }
-  | {
-      type: 'agent_permission_requested'
-      task: Readonly<AgentTask>
-      toolName: string
-      description: string
-    }
-  | {
-      type: 'agent_permission_blocked'
-      task: Readonly<AgentTask>
-      blocker: Readonly<AgentBlocker>
-    }
+  | { type: 'swarm:worker-revived'; workerId: string; timestamp: number }
 
 export type SwarmUIEventListener = (event: SwarmUIEvent) => void
+
+export interface AgentMeta {
+  agentId: string
+  taskId: string
+  batchId: string
+  description: string
+  prompt: string
+  role: string
+  parentAgentId: string
+  permissionMode: PermissionMode | undefined
+}
 
 export interface AgentTranscriptPersistence {
   saveAgentManifest?(
     tasks: readonly AgentTask[],
     batches?: readonly AgentBatch[],
+    agentMetas?: readonly AgentMeta[],
   ): Promise<void>
-  loadAgentManifest?(): Promise<AgentTask[]>
+  loadAgentManifest?(): Promise<{
+    tasks: AgentTask[]
+    batches?: AgentBatch[]
+    agentMetas?: AgentMeta[]
+  }>
   loadAgentBatches?(): Promise<AgentBatch[]>
   saveAgentTranscript?(
     agentId: string,

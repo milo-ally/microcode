@@ -44,7 +44,6 @@ export class AgentTaskStore {
       description: request.description,
       prompt: request.prompt,
       role: request.role ?? 'worker',
-      workKind: request.workKind ?? 'read',
       status: 'queued',
       blockers: [],
       createdAt: Date.now(),

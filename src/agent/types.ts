@@ -8,9 +8,7 @@ import type { Api, Model } from '@earendil-works/pi-ai'
 import type { McpServerState } from '../mcp/types.ts'
 import type {
   NonInteractivePermissionStrategy,
-  AgentCapability,
   EffectivePolicy,
-  PermissionBlockDetails,
   PermissionDecision,
   PermissionMode,
   PermissionSnapshot,
@@ -37,7 +35,6 @@ export type CreateAgentIdentity = Partial<AgentIdentity> & Pick<AgentIdentity, '
 
 export interface AgentPermissionConfig {
   mode?: PermissionMode
-  capabilities?: AgentCapability[]
   allow?: string[]
   deny?: string[]
   ask?: string[]
@@ -56,7 +53,6 @@ export interface AgentPermissionConfig {
     input: Record<string, unknown>,
     description: string,
   ) => Promise<boolean>
-  onPermissionBlocked?: (blocker: PermissionBlockDetails) => Promise<void> | void
 }
 
 export interface CreateMicrocodeAgentOptions {
@@ -156,11 +152,6 @@ export type MicrocodeAgentEvent =
       readonly agentId: string
       readonly request: Readonly<AgentPermissionRequest>
       readonly allowed: boolean
-    }
-  | {
-      readonly type: 'permission_blocked'
-      readonly agentId: string
-      readonly blocker: Readonly<PermissionBlockDetails>
     }
   | {
       readonly type: 'model_changed'

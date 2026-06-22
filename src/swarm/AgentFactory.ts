@@ -1,42 +1,59 @@
 import { createMicrocodeAgentRuntime, type MicrocodeAgent } from '../agent/index.ts'
 import { getWorkerPrompt } from './prompts.ts'
 import type { AgentFactoryContext } from './types.ts'
-import type { AgentCapability } from '../permissions/index.ts'
-import { ALL_CAPABILITIES, READ_CAPABILITIES } from '../permissions/index.ts'
 
-export function getWorkerCapabilities(
-  context: AgentFactoryContext,
-  grants: Iterable<AgentCapability> = [],
-): AgentCapability[] {
-  const parentCapabilities = new Set(
-    context.parent.getPermissionSnapshot().capabilities,
-  )
-  const profile = context.request.workKind === 'read'
-    ? new Set<AgentCapability>([...READ_CAPABILITIES, ...grants])
-    : new Set<AgentCapability>([
-        ...ALL_CAPABILITIES.filter((capability) => capability !== 'agents.spawn'),
-        ...grants,
-      ])
-  const requested = context.request.capabilities
-    ? new Set(context.request.capabilities)
-    : profile
-  return [...requested].filter((capability) =>
-    profile.has(capability) && parentCapabilities.has(capability)
-  )
+import { TOOL_NAME as READ_TOOL_NAME } from '../tools/FileReadTool/FileReadTool.ts'
+import { TOOL_NAME as EDIT_TOOL_NAME } from '../tools/FileEditTool/FileEditTool.ts'
+import { TOOL_NAME as WRITE_TOOL_NAME } from '../tools/FileWriteTool/FileWriteTool.ts'
+import { TOOL_NAME as GREP_TOOL_NAME } from '../tools/GrepTool/GrepTool.ts'
+import { TOOL_NAME as GLOB_TOOL_NAME } from '../tools/GlobTool/GlobTool.ts'
+import { TOOL_NAME as VISION_TOOL_NAME } from '../tools/VisionTool/VisionTool.ts'
+import { TOOL_NAME as SKILL_TOOL_NAME } from '../tools/SkillTool/SkillTool.ts'
+import { TOOL_SEARCH_TOOL_NAME } from '../tools/ToolSearchTool/ToolSearchTool.ts'
+import { TOOL_NAME as TASK_TOOL_NAME } from '../tools/TaskTool/TaskTool.ts'
+import { ASK_USER_QUESTION_TOOL_NAME } from '../tools/AskUserQuestionTool/AskUserQuestionTool.ts'
+import { TOOL_NAME as SPAWN_TOOL_NAME } from '../tools/SpawnAgentTool/SpawnAgentTool.ts'
+import { TOOL_NAME as MESSAGE_TOOL_NAME } from '../tools/SendAgentMessageTool/SendAgentMessageTool.ts'
+import { TOOL_NAME as STOP_TOOL_NAME } from '../tools/StopAgentTool/StopAgentTool.ts'
+import { TOOL_NAME as STATUS_TOOL_NAME } from '../tools/GetAgentStatusTool/GetAgentStatusTool.ts'
+
+const ALWAYS_DENIED = new Set([
+  TASK_TOOL_NAME,
+  ASK_USER_QUESTION_TOOL_NAME,
+  SPAWN_TOOL_NAME,
+  MESSAGE_TOOL_NAME,
+  STOP_TOOL_NAME,
+  STATUS_TOOL_NAME,
+])
+
+const DEFAULT_TOOLS = [
+  READ_TOOL_NAME,
+  GREP_TOOL_NAME,
+  GLOB_TOOL_NAME,
+  VISION_TOOL_NAME,
+  SKILL_TOOL_NAME,
+  TOOL_SEARCH_TOOL_NAME,
+]
+
+const WRITE_TOOL_NAMES = new Set([EDIT_TOOL_NAME, WRITE_TOOL_NAME])
+
+export function getDefaultWorkerTools(): string[] {
+  return [...DEFAULT_TOOLS]
+}
+
+export function isWriteWorker(worker: MicrocodeAgent): boolean {
+  return worker.getSnapshot().toolNames.some((name) => WRITE_TOOL_NAMES.has(name))
 }
 
 export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent {
   const { parent, request, agentId } = context
   const parentSnapshot = parent.getSnapshot()
-  const parentMode = parent.getPermissionMode()
-  const requestedMode = request.permissionMode ?? parentMode
-  const mode = parentMode === 'plan'
-    ? 'plan'
-    : parentMode === 'interactive' && requestedMode === 'auto-approve'
-      ? 'interactive'
-      : requestedMode
 
-      
+  const parentToolNames = new Set(parentSnapshot.toolNames)
+  const allowed = request.tools
+    ? request.tools.filter((name) => parentToolNames.has(name))
+    : DEFAULT_TOOLS.filter((name) => parentToolNames.has(name))
+
   const worker = createMicrocodeAgentRuntime({
     cwd: request.cwd ?? parentSnapshot.cwd,
     modelId: request.modelId ?? parentSnapshot.model.id,
@@ -48,8 +65,7 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
       parentId: request.parentAgentId,
     },
     permission: {
-      mode,
-      capabilities: getWorkerCapabilities(context),
+      mode: 'auto-approve',
     },
     systemPromptSuffix: getWorkerPrompt(
       request.parentAgentId,
@@ -57,7 +73,6 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
     ),
   })
 
-  // Inherit parent rules, while the worker profile keeps its own capability ceiling.
   worker.inheritPermissions(parent.getPermissionSnapshot(), [], false)
 
   for (const skillName of parent.getLoadedSkillNames()) {
@@ -65,6 +80,11 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
       worker.loadSkill(skillName)
     }
   }
-  worker.removeTools(['task', 'bash', 'Ask'])
+
+  const allToolNames = worker.getSnapshot().toolNames
+  const toRemove = allToolNames.filter(
+    (name) => ALWAYS_DENIED.has(name) || !allowed.includes(name),
+  )
+  worker.removeTools(toRemove)
   return worker
 }

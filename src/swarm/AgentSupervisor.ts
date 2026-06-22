@@ -3,11 +3,11 @@ import type { AssistantMessage } from '@earendil-works/pi-ai'
 import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
 import { AgentRegistry } from './AgentRegistry.ts'
 import { AgentTaskStore } from './AgentTaskStore.ts'
-import { createWorkerAgent } from './AgentFactory.ts'
-import { getWorkerCapabilities } from './AgentFactory.ts'
-import type { AgentCapability } from '../permissions/index.ts'
+import { createWorkerAgent, isWriteWorker } from './AgentFactory.ts'
+import type { PermissionMode as _PermissionMode } from '../permissions/index.ts'
 import type {
   AgentBatch,
+  AgentMeta,
   AgentRuntimeState,
   AgentTask,
   AgentTranscriptPersistence,
@@ -20,16 +20,29 @@ function createId(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
 }
 
-function extractAssistantText(messages: readonly AgentMessage[]): string {
-  const assistant = [...messages].reverse().find(
-    (message): message is AssistantMessage => message.role === 'assistant',
-  )
-  if (!assistant) return ''
-  return assistant.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n')
-    .trim()
+function extractWorkerResult(messages: readonly AgentMessage[]): string {
+  const parts: string[] = []
+
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      const text = (message as AssistantMessage).content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+        .trim()
+      if (text) parts.push(text)
+    } else if (message.role === 'toolResult') {
+      const tr = message as import('@earendil-works/pi-ai').ToolResultMessage
+      const text = tr.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+        .trim()
+      if (text) parts.push(`[${tr.toolName}] ${text}`)
+    }
+  }
+
+  return parts.join('\n').trim()
 }
 
 function describeActivity(event: MicrocodeAgentEvent): string | undefined {
@@ -41,13 +54,10 @@ function describeActivity(event: MicrocodeAgentEvent): string | undefined {
       ? args.file_path
       : undefined
   switch (event.toolName) {
-    case 'file_read':
     case 'read':
       return path ? `Reading ${path}` : 'Reading a file'
-    case 'file_edit':
     case 'edit':
       return path ? `Editing ${path}` : 'Editing a file'
-    case 'file_write':
     case 'write':
       return path ? `Writing ${path}` : 'Writing a file'
     case 'grep':
@@ -70,17 +80,14 @@ function toolDetail(toolName: string, args: Record<string, unknown>): string {
       const preview = cmd.length > 40 ? `${cmd.slice(0, 40)}…` : cmd
       return preview || 'bash'
     }
-    case 'file_read':
     case 'read': {
       const p = typeof args.file_path === 'string' ? args.file_path : ''
       return basename(p) || 'file'
     }
-    case 'file_edit':
     case 'edit': {
       const p = typeof args.file_path === 'string' ? args.file_path : ''
       return basename(p) || 'edit'
     }
-    case 'file_write':
     case 'write': {
       const p = typeof args.file_path === 'string' ? args.file_path : ''
       return basename(p) || 'write'
@@ -131,7 +138,7 @@ export class AgentSupervisor {
   private readonly unsubscribers = new Map<string, () => void>()
   private readonly queuedPrompts = new Map<string, string>()
   private readonly batches = new Map<string, AgentBatch>()
-  private readonly sessionCapabilityGrants = new Set<AgentCapability>()
+  private sleepingAgentMetas: AgentMeta[] = []
   private currentCoordinatorTurnId?: string
   private coordinatorUnsubscribe?: () => void
   private sealTimer: ReturnType<typeof setTimeout> | null = null
@@ -150,10 +157,14 @@ export class AgentSupervisor {
   }
 
   async restore(): Promise<void> {
-    const tasks = await this.persistence?.loadAgentManifest?.()
+    const manifest = await this.persistence?.loadAgentManifest?.()
     const batches = await this.persistence?.loadAgentBatches?.()
-    if (tasks) {
+    if (manifest) {
+      const tasks = Array.isArray(manifest) ? manifest : manifest.tasks
       this.tasks.restore(tasks)
+      if (manifest.agentMetas) {
+        this.sleepingAgentMetas = manifest.agentMetas
+      }
       for (const batch of batches ?? []) {
         this.batches.set(batch.id, {
           ...batch,
@@ -183,15 +194,31 @@ export class AgentSupervisor {
       await this.persistManifest()
       for (const batch of this.batches.values()) this.tryDeliverBatch(batch.id)
     }
+    await this.resumeSession()
   }
 
   async prepareSessionSwitch(): Promise<void> {
+    this.sleepingAgentMetas = []
     const active = this.tasks.list().filter((task) =>
       task.status === 'queued' ||
-      task.status === 'running'
+      task.status === 'running' ||
+      task.status === 'blocked'
     )
     for (const task of active) {
-      this.registry.get(task.agentId)?.abort()
+      const agent = this.registry.get(task.agentId)
+      if (agent) {
+        this.sleepingAgentMetas.push({
+          agentId: task.agentId,
+          taskId: task.id,
+          batchId: task.batchId,
+          description: task.description,
+          prompt: task.prompt,
+          role: task.role,
+          parentAgentId: task.parentAgentId,
+          permissionMode: agent.getPermissionMode(),
+        })
+        agent.abort()
+      }
       this.clearTimer(task.id)
       this.tasks.update(task.id, {
         status: 'interrupted',
@@ -217,56 +244,52 @@ export class AgentSupervisor {
     this.batches.clear()
   }
 
+  async resumeSession(): Promise<void> {
+    for (const meta of this.sleepingAgentMetas) {
+      const task = this.tasks.get(meta.taskId)
+      if (task) {
+        this.reviveWorker(meta)
+      }
+    }
+    this.sleepingAgentMetas = []
+  }
+
+  private reviveWorker(
+    meta: (typeof this.sleepingAgentMetas)[number],
+  ): void {
+    const request: SpawnAgentRequest = {
+      description: meta.description,
+      prompt: meta.prompt,
+      role: meta.role,
+      parentAgentId: meta.parentAgentId,
+    }
+    const worker = createWorkerAgent({
+      parent: this.coordinator,
+      request,
+      agentId: meta.agentId,
+      persistence: this.persistence,
+    })
+    this.configureWorker?.(worker)
+    this.registry.register(worker)
+    this.emit({
+      type: 'swarm:worker-revived',
+      workerId: meta.agentId,
+      timestamp: Date.now(),
+    })
+  }
+
   subscribe(listener: SwarmUIEventListener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
-  /** Push parent permission rules (and optionally mode) to all worker agents. */
+  /** Push parent permission rules to all worker agents. */
   syncPermissionsToWorkers(updateMode = false): void {
     const snapshot = this.coordinator.getPermissionSnapshot()
     for (const agent of this.registry.list()) {
       if (agent.getId() === this.coordinator.getId()) continue
-      const task = this.tasks.getByAgent(agent.getId())
-      if (!task) continue
       agent.inheritPermissions(snapshot, [], updateMode)
-      agent.setCapabilities(getWorkerCapabilities({
-        parent: this.coordinator,
-        request: {
-          parentAgentId: task.parentAgentId,
-          description: task.description,
-          prompt: task.prompt,
-          role: task.role,
-          workKind: task.workKind,
-        },
-        agentId: task.agentId,
-      }, this.sessionCapabilityGrants))
-      agent.setApprovedCapabilities(this.sessionCapabilityGrants)
     }
-  }
-
-  grantSessionCapabilities(capabilities: readonly AgentCapability[]): AgentCapability[] {
-    const parentCapabilities = new Set(
-      this.coordinator.getPermissionSnapshot().capabilities,
-    )
-    const granted = capabilities.filter((capability) => parentCapabilities.has(capability))
-    for (const capability of granted) this.sessionCapabilityGrants.add(capability)
-    this.syncPermissionsToWorkers(false)
-    return granted
-  }
-
-  getGrantableCapabilities(): AgentCapability[] {
-    const blocked = new Set<AgentCapability>()
-    for (const task of this.tasks.list()) {
-      for (const blocker of task.blockers) blocked.add(blocker.requiredCapability)
-    }
-    const parentCapabilities = new Set(
-      this.coordinator.getPermissionSnapshot().capabilities,
-    )
-    return [...blocked].filter((capability) =>
-      parentCapabilities.has(capability) &&
-      !this.sessionCapabilityGrants.has(capability)
-    )
   }
 
   getMaxWorkers(): number {
@@ -349,7 +372,6 @@ export class AgentSupervisor {
       description: previous.description,
       prompt: message,
       role: previous.role,
-      workKind: previous.workKind,
     }, {
       taskId: createId('task'),
       agentId,
@@ -430,13 +452,14 @@ export class AgentSupervisor {
     while (this.getRunningCount() < this.maxWorkers) {
       const index = this.queue.findIndex((taskId) => {
         const task = this.tasks.get(taskId)
-        if (!task) return false
-        if (task.workKind !== 'write') return true
-        return !this.tasks.list().some((other) =>
-          other.id !== task.id &&
-          other.workKind === 'write' &&
-          other.status === 'running'
-        )
+        const worker = task ? this.registry.get(task.agentId) : undefined
+        if (!task || !worker) return false
+        if (!isWriteWorker(worker)) return true
+        return !this.tasks.list().some((other) => {
+          if (other.id === task.id || other.status !== 'running') return false
+          const w = this.registry.get(other.agentId)
+          return w ? isWriteWorker(w) : false
+        })
       })
       if (index === -1) return
       const [taskId] = this.queue.splice(index, 1)
@@ -478,7 +501,7 @@ export class AgentSupervisor {
       const current = this.tasks.get(taskId)
       if (!current || current.status !== 'running') return
       const snapshot = worker.getTokenStats()
-      const result = extractAssistantText(worker.getMessages())
+      const result = extractWorkerResult(worker.getMessages())
       const last = [...worker.getMessages()].reverse().find(
         (message): message is AssistantMessage => message.role === 'assistant',
       )
@@ -554,33 +577,6 @@ export class AgentSupervisor {
           entry.error = event.isError
         }
       }
-      if (event.type === 'permission_requested') {
-        this.emit({
-          type: 'agent_permission_requested',
-          task,
-          toolName: event.request.toolName,
-          description: event.request.description ?? event.request.toolName,
-        })
-      } else if (event.type === 'permission_blocked') {
-        const current = this.tasks.get(taskId)
-        if (current) {
-          const duplicate = current.blockers.some((blocker) =>
-            blocker.toolName === event.blocker.toolName &&
-            blocker.operation === event.blocker.operation &&
-            blocker.requiredCapability === event.blocker.requiredCapability
-          )
-          const blocked = duplicate
-            ? current
-            : this.tasks.update(taskId, {
-                blockers: [...current.blockers, { ...event.blocker }],
-              })
-          this.emit({
-            type: 'agent_permission_blocked',
-            task: blocked,
-            blocker: event.blocker,
-          })
-        }
-      }
       const activity = describeActivity(event)
       if (activity) {
         this.activities.set(worker.getId(), activity)
@@ -633,11 +629,9 @@ export class AgentSupervisor {
       : ''
     const blockers = task.blockers.length > 0
       ? `\n    <blockers>\n${task.blockers.map((blocker) =>
-          `      <blocker type="permission" capability="${this.xmlEscape(blocker.requiredCapability)}" retryable="${blocker.retryable}">\n` +
+          `      <blocker>\n` +
           `        <tool>${this.xmlEscape(blocker.toolName)}</tool>\n` +
-          `        <operation>${this.xmlEscape(blocker.operation)}</operation>\n` +
           `        <reason>${this.xmlEscape(blocker.reason)}</reason>\n` +
-          `        <input>${this.xmlEscape(blocker.inputSummary)}</input>\n` +
           '      </blocker>'
         ).join('\n')}\n    </blockers>`
       : ''
@@ -722,12 +716,37 @@ export class AgentSupervisor {
   }
 
   private async persistManifest(): Promise<void> {
+    const allMetas = this.collectAgentMetas()
     await this.persistence?.saveAgentManifest?.(
       this.tasks.list() as readonly AgentTask[],
       [...this.batches.values()].map((batch) => ({
         ...batch,
         taskIds: [...batch.taskIds],
       })),
+      allMetas,
     )
+  }
+
+  private collectAgentMetas(): AgentMeta[] {
+    const seen = new Set(this.sleepingAgentMetas.map((m) => m.agentId))
+    const metas = [...this.sleepingAgentMetas]
+    for (const agent of this.registry.list()) {
+      if (agent.getId() === this.coordinator.getId()) continue
+      if (seen.has(agent.getId())) continue
+      const task = this.tasks.getByAgent(agent.getId())
+      if (!task) continue
+      seen.add(agent.getId())
+      metas.push({
+        agentId: agent.getId(),
+        taskId: task.id,
+        batchId: task.batchId,
+        description: task.description,
+        prompt: task.prompt,
+        role: task.role,
+        parentAgentId: task.parentAgentId,
+        permissionMode: agent.getPermissionMode(),
+      })
+    }
+    return metas
   }
 }

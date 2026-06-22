@@ -6,7 +6,7 @@ import { createWorkerAgent } from '../../src/swarm/index.ts'
 beforeAll(() => ensureBootstrapMacro())
 
 describe('AgentFactory permissions', () => {
-  test('does not allow a child mode to exceed its parent', () => {
+  test('worker is always auto-approve', () => {
     const parent = createMicrocodeAgentRuntime({
       identity: { id: 'parent' },
       permission: {
@@ -21,22 +21,23 @@ describe('AgentFactory permissions', () => {
         parentAgentId: parent.getId(),
         description: 'Implement',
         prompt: 'Implement the change',
-        workKind: 'write',
-        permissionMode: 'auto-approve',
+       
       },
     })
-    expect(worker.getPermissionMode()).toBe('interactive')
+    expect(worker.getPermissionMode()).toBe('auto-approve')
+    // Deny rules from parent are inherited.
     expect(worker.checkPermission('bash', { command: 'echo unsafe' })).toEqual({
       allowed: false,
       reason: 'Tool "bash" denied by rule: bash',
     })
+    // Tools not in the allowed set are removed.
     expect(worker.hasTool('spawn_agent')).toBe(false)
     expect(worker.hasTool('task')).toBe(false)
   })
 
-  test('gives read workers a research capability profile', () => {
+  test('read workers get only read tools', () => {
     const parent = createMicrocodeAgentRuntime({
-      identity: { id: 'parent-auto' },
+      identity: { id: 'parent' },
       permission: { mode: 'auto-approve' },
     })
     const worker = createWorkerAgent({
@@ -46,33 +47,34 @@ describe('AgentFactory permissions', () => {
         parentAgentId: parent.getId(),
         description: 'Read',
         prompt: 'Inspect files',
-        workKind: 'read',
+       
       },
     })
     expect(worker.getPermissionMode()).toBe('auto-approve')
-    expect(worker.checkPermission('bash', { command: 'node --version' }).allowed).toBe(true)
-    expect(worker.checkPermission('bash', { command: 'npm install' }).allowed).toBe(false)
-    expect(worker.checkPermission('file_edit', { path: 'x' }).allowed).toBe(false)
+    expect(worker.hasTool('read')).toBe(true)
+    expect(worker.hasTool('grep')).toBe(true)
+    expect(worker.hasTool('edit')).toBe(false)
+    expect(worker.hasTool('write')).toBe(false)
   })
 
-  test('keeps legacy plan mode while exposing only read capabilities', () => {
+  test('write workers get read + write tools', () => {
     const parent = createMicrocodeAgentRuntime({
-      identity: { id: 'parent-plan' },
+      identity: { id: 'parent' },
       permission: { mode: 'plan' },
     })
     const worker = createWorkerAgent({
       parent,
-      agentId: 'planned-worker',
+      agentId: 'writer',
       request: {
         parentAgentId: parent.getId(),
-        description: 'Plan',
-        prompt: 'Inspect safely',
-        workKind: 'write',
+        description: 'Write',
+        prompt: 'Edit files',
+        tools: ['read', 'grep', 'glob', 'edit', 'write'],
       },
     })
-    expect(worker.getPermissionMode()).toBe('plan')
-    expect(worker.getEffectivePolicy().approvalMode).toBe('interactive')
-    expect(worker.checkPermission('bash', { command: 'git status' }).allowed).toBe(true)
-    expect(worker.checkPermission('write', { path: 'x' }).allowed).toBe(false)
+    expect(worker.getPermissionMode()).toBe('auto-approve')
+    expect(worker.hasTool('read')).toBe(true)
+    expect(worker.hasTool('edit')).toBe(true)
+    expect(worker.hasTool('write')).toBe(true)
   })
 })

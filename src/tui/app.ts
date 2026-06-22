@@ -48,6 +48,8 @@ import { SessionManager } from '../session/SessionManager.ts'
 import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
 import type { Skill } from '../skill/skill.ts'
 import { type PermissionMode, PERMISSION_MODES } from '../permissions/index.ts'
+import { TOOL_NAME as SPAWN_TOOL_NAME } from '../tools/SpawnAgentTool/SpawnAgentTool.ts'
+import { promptSpawnPermission } from '../tools/SpawnAgentTool/UI.tsx'
 import type { TaskList } from '../tasks/TaskSystem.ts'
 import { MultiSelectList, type MultiSelectItem } from './components/multiSelectList.ts'
 import { AgentResult } from './components/agentResult.ts'
@@ -651,7 +653,7 @@ export class App {
       dim('│'),
       `├─ ${dim('ID')}        ${task.agentId.slice(0, 40)}`,
       `├─ ${dim('Status')}    ${task.status}${task.error ? ` — ${task.error}` : ''}`,
-      `├─ ${dim('Role')}      ${task.role} (${task.workKind})`,
+      `├─ ${dim('Role')}      ${task.role}`,
       `├─ ${dim('Time')}      ${durationStr} · ${task.usage.tokens.toLocaleString()} tokens · ${task.usage.toolCalls} tools`,
       dim('│'),
     ]
@@ -698,10 +700,7 @@ export class App {
       )
       for (const blocker of task.blockers) {
         this.chatContainer.addChild(
-          new Text(`│  ${blocker.toolName}: ${blocker.operation}`, 1, 0),
-        )
-        this.chatContainer.addChild(
-          new Text(`│  ${dim(`Needs ${blocker.requiredCapability} — ${blocker.reason}`)}`, 1, 0),
+          new Text(`│  ${blocker.toolName}: ${blocker.reason}`, 1, 0),
         )
       }
     }
@@ -2078,6 +2077,10 @@ export class App {
     input: Record<string, unknown>,
     description: string,
   ): Promise<boolean> {
+    if (toolName === SPAWN_TOOL_NAME) {
+      return this.promptSpawnPermission(input, description)
+    }
+
     return new Promise<boolean>((resolve) => {
       // Permission waiting is not tool execution time.
       this.pauseToolElapsedTimer()
@@ -2160,6 +2163,60 @@ export class App {
       }
       selectList.onCancel = () => finish(false)
     })
+  }
+
+  private async promptSpawnPermission(
+    input: Record<string, unknown>,
+    _description: string,
+  ): Promise<boolean> {
+    this.pauseToolElapsedTimer()
+    this.hideWorking()
+    this.permissionPromptActive = true
+
+    // Intercept Ctrl+C to exit app
+    let finished = false
+    const removeListener = this.ui.addInputListener((data) => {
+      if (data === '\x03') {
+        finished = true
+        removeListener()
+        this.permissionPromptActive = false
+        this.flushPendingEventsWhilePermission()
+        this.exit()
+        return { consume: true }
+      }
+      return undefined
+    })
+
+    const result = await promptSpawnPermission({
+      input,
+      parentToolNames: this.agent.getSnapshot().toolNames,
+      chatContainer: this.chatContainer,
+      setFocus: (c) => this.ui.setFocus(c),
+      requestRender: () => this.ui.requestRender(),
+    })
+
+    if (!finished) {
+      removeListener()
+    }
+    this.permissionPromptActive = false
+    this.flushPendingEventsWhilePermission()
+
+    if (result.allowSession) {
+      this.agent.addSessionPermission(SPAWN_TOOL_NAME)
+      this.supervisor?.syncPermissionsToWorkers()
+    }
+
+    if (result.approved) {
+      this.resumeToolElapsedTimer()
+      this.showWorking()
+    } else {
+      this.clearPendingToolState()
+      this.hideWorking()
+      this.agent.abort()
+    }
+    this.ui.setFocus(this.editor)
+    this.ui.requestRender()
+    return result.approved
   }
 
   private extractRuleContent(toolName: string, input: Record<string, unknown>): string | undefined {
@@ -2756,6 +2813,7 @@ export class App {
       )
       this.loadingAnimation.start()
       this.statusContainer.clear()
+      this.agentTreeWidgets = []
       this.statusContainer.addChild(this.loadingAnimation)
       this.ui.requestRender()
     }
@@ -2766,6 +2824,8 @@ export class App {
       this.loadingAnimation.stop()
       this.statusContainer.clear()
       this.loadingAnimation = undefined
+      // Restore agent tree so worker status is visible between coordinator turns.
+      this.updateAgentTree()
       this.ui.requestRender()
     }
   }

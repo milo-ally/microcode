@@ -8,7 +8,7 @@ describe('AgentTaskStore', () => {
       parentAgentId: 'parent',
       description: 'Inspect auth',
       prompt: 'Inspect auth files',
-      workKind: 'read',
+     
     }, {
       taskId: 'task-1',
       agentId: 'agent-1',
@@ -34,7 +34,7 @@ describe('AgentTaskStore', () => {
       description: 'Running work',
       prompt: 'work',
       role: 'worker',
-      workKind: 'write',
+     
       status: 'running',
       createdAt: 1,
       usage: { tokens: 0, toolCalls: 0 },

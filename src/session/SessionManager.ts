@@ -20,7 +20,7 @@ import {
   type TaskMarkUpdate,
   type TaskReminderUpdate,
 } from '../tasks/TaskSystem.ts'
-import type { AgentBatch, AgentTask } from '../swarm/types.ts'
+import type { AgentBatch, AgentMeta, AgentTask } from '../swarm/types.ts'
 
 const SESSIONS_DIR = path.join(os.homedir(), '.microcode', 'sessions')
 const TITLES_FILE = path.join(SESSIONS_DIR, '.titles.json')
@@ -216,19 +216,21 @@ export class SessionManager implements AgentSessionPersistence {
   async saveAgentManifest(
     tasks: readonly AgentTask[],
     batches: readonly AgentBatch[] = [],
+    agentMetas: readonly AgentMeta[] = [],
   ): Promise<void> {
-    return this.withManifestLock(() => this.writeManifestUnsafe(tasks, batches))
+    return this.withManifestLock(() => this.writeManifestUnsafe(tasks, batches, agentMetas))
   }
 
   private async writeManifestUnsafe(
     tasks: readonly AgentTask[],
     batches: readonly AgentBatch[],
+    agentMetas: readonly AgentMeta[],
   ): Promise<void> {
     const dir = this.getAgentSessionDir()
     await mkdir(dir, { recursive: true })
     await this.atomicWrite(
       path.join(dir, 'manifest.json'),
-      JSON.stringify({ version: 2, tasks, batches }, null, 2),
+      JSON.stringify({ version: 2, tasks, batches, agentMetas }, null, 2),
     )
   }
 
@@ -245,16 +247,22 @@ export class SessionManager implements AgentSessionPersistence {
     })
   }
 
-  async loadAgentManifest(): Promise<AgentTask[]> {
+  async loadAgentManifest(): Promise<{ tasks: AgentTask[]; batches?: AgentBatch[]; agentMetas?: AgentMeta[] }> {
     const file = path.join(this.getAgentSessionDir(), 'manifest.json')
     try {
       const parsed = JSON.parse(await readFile(file, 'utf8')) as {
         version?: number
         tasks?: AgentTask[]
+        batches?: AgentBatch[]
+        agentMetas?: AgentMeta[]
       }
-      return Array.isArray(parsed.tasks) ? parsed.tasks : []
+      return {
+        tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+        batches: Array.isArray(parsed.batches) ? parsed.batches : undefined,
+        agentMetas: Array.isArray(parsed.agentMetas) ? parsed.agentMetas : undefined,
+      }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { tasks: [] }
       throw error
     }
   }

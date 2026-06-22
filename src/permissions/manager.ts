@@ -1,19 +1,8 @@
-/**
- * PermissionManager — central permission checking for tool execution.
- *
- * Follows microcode-ts's permission architecture with three modes:
- * - interactive: rules-based + ask for dangerous tools
- * - auto-approve: execute available capabilities without confirmation
- * - plan: compatibility mode mapped to read capabilities
- */
-
 import type { AgentTool, BeforeToolCallContext, BeforeToolCallResult } from '@earendil-works/pi-agent-core'
 import { getToolDefinition } from '../tools/registry.ts'
 import { matchRule, parseRuleString, ruleValueToString } from './rules.ts'
 import type {
-  AgentCapability,
   EffectivePolicy,
-  PermissionBlockDetails,
   PermissionBehavior,
   PermissionDecision,
   PermissionMode,
@@ -24,26 +13,6 @@ import type {
   ToolPermissionContext,
 } from './types.ts'
 import { TOOL_DEFAULT_PERMISSIONS, ASK_USER_QUESTION_TOOL_NAME } from '../tools/index.ts'
-import {
-  ALL_CAPABILITIES,
-  capabilitiesForMode,
-  createCapabilityBlocker,
-  requiredCapability,
-} from './capabilities.ts'
-
-function blockedDecision(
-  reason: string,
-  blocker?: PermissionBlockDetails,
-): PermissionDecision {
-  const decision: PermissionDecision = { allowed: false, reason }
-  if (blocker) {
-    Object.defineProperty(decision, 'blocker', {
-      value: blocker,
-      enumerable: false,
-    })
-  }
-  return decision
-}
 
 export interface PermissionManagerOptions {
   mode?: PermissionMode
@@ -65,10 +34,7 @@ export interface PermissionManagerOptions {
     input: Record<string, unknown>,
     description: string,
   ) => Promise<boolean>
-  /** Resolver to look up a tool instance from the owning Agent tool manager. */
   getTool?: (name: string) => AgentTool<any, any> | undefined
-  capabilities?: AgentCapability[]
-  onPermissionBlocked?: (blocker: PermissionBlockDetails) => Promise<void> | void
 }
 
 export class PermissionManager {
@@ -89,8 +55,6 @@ export class PermissionManager {
     description: string,
   ) => Promise<boolean>
   private getTool?: (name: string) => AgentTool<any, any> | undefined
-  private configuredCapabilities: Set<AgentCapability>
-  private onPermissionBlocked?: (blocker: PermissionBlockDetails) => Promise<void> | void
 
   constructor(options: PermissionManagerOptions = {}) {
     const allowRules: PermissionRule[] = []
@@ -110,14 +74,8 @@ export class PermissionManager {
       askRules.push({ ...value, behavior: 'ask', source: 'cliArg' })
     }
 
-    this.configuredCapabilities = new Set(options.capabilities ?? ALL_CAPABILITIES)
     this.context = {
       mode: options.mode ?? 'interactive',
-      capabilities: capabilitiesForMode(
-        options.mode ?? 'interactive',
-        this.configuredCapabilities,
-      ),
-      approvedCapabilities: new Set(),
       allowRules,
       denyRules,
       askRules,
@@ -127,7 +85,6 @@ export class PermissionManager {
     this.nonInteractiveStrategy = options.nonInteractiveStrategy ?? 'deny'
     this.onDelegatePermissionRequest = options.onDelegatePermissionRequest
     this.getTool = options.getTool
-    this.onPermissionBlocked = options.onPermissionBlocked
   }
 
   setOnPermissionRequest(
@@ -171,26 +128,11 @@ export class PermissionManager {
 
   setMode(mode: PermissionMode): void {
     this.context.mode = mode
-    this.context.capabilities = capabilitiesForMode(mode, this.configuredCapabilities)
-  }
-
-  setCapabilities(capabilities: Iterable<AgentCapability>): void {
-    this.configuredCapabilities = new Set(capabilities)
-    this.context.capabilities = capabilitiesForMode(
-      this.context.mode,
-      this.configuredCapabilities,
-    )
-  }
-
-  setApprovedCapabilities(capabilities: Iterable<AgentCapability>): void {
-    this.context.approvedCapabilities = new Set(capabilities)
   }
 
   getEffectivePolicy(): Readonly<EffectivePolicy> {
     return Object.freeze({
       approvalMode: this.context.mode === 'auto-approve' ? 'auto-approve' : 'interactive',
-      capabilities: new Set(this.context.capabilities),
-      approvedCapabilities: new Set(this.context.approvedCapabilities),
       rules: Object.freeze([
         ...this.context.denyRules,
         ...this.context.askRules,
@@ -214,10 +156,6 @@ export class PermissionManager {
     if (idx !== -1) list.splice(idx, 1)
   }
 
-  /**
-   * Add a session-level allow rule. These rules last for the lifetime of the
-   * session and are checked before mode defaults.
-   */
   addSessionRule(toolName: string, ruleContent?: string): void {
     this.context.allowRules.push({
       toolName,
@@ -230,8 +168,6 @@ export class PermissionManager {
   getContext(): ToolPermissionContext {
     return {
       mode: this.context.mode,
-      capabilities: new Set(this.context.capabilities),
-      approvedCapabilities: new Set(this.context.approvedCapabilities),
       allowRules: this.context.allowRules.map((rule) => ({ ...rule })),
       denyRules: this.context.denyRules.map((rule) => ({ ...rule })),
       askRules: this.context.askRules.map((rule) => ({ ...rule })),
@@ -245,8 +181,6 @@ export class PermissionManager {
     return Object.freeze({
       mode: this.context.mode,
       approvalMode: this.context.mode === 'auto-approve' ? 'auto-approve' : 'interactive',
-      capabilities: Object.freeze([...this.context.capabilities]),
-      approvedCapabilities: Object.freeze([...this.context.approvedCapabilities]),
       nonInteractiveStrategy: this.nonInteractiveStrategy,
       allowRules: freezeRules(this.context.allowRules),
       denyRules: freezeRules(this.context.denyRules),
@@ -254,10 +188,6 @@ export class PermissionManager {
     })
   }
 
-  /**
-   * Replace all rules from a parent snapshot (permission inheritance).
-   * Worker-specific deny rules are merged in on top.
-   */
   inheritFrom(snapshot: PermissionSnapshot, extraDeny: PermissionRuleValue[] = [], updateMode = true): void {
     this.context.allowRules = snapshot.allowRules.map((r) => ({ ...r }))
     this.context.denyRules = [
@@ -270,63 +200,24 @@ export class PermissionManager {
     }
   }
 
-  /**
-   * Core permission check — returns a decision.
-   */
   checkPermission(
     toolName: string,
-    input: Record<string, unknown>,
+    _input: Record<string, unknown>,
   ): PermissionDecision {
     const { mode } = this.context
-    const requirement = requiredCapability(toolName, input)
 
-    // Priority: deny > capability boundary > ask > allow > approval default.
-    const denyMatch = matchRule(toolName, input, this.context.denyRules)
+    const denyMatch = matchRule(toolName, _input, this.context.denyRules)
     if (denyMatch) {
-      const reason = `Tool "${toolName}" denied by rule: ${ruleValueToString(denyMatch)}`
-      return blockedDecision(
-        reason,
-        requirement.capability
-          ? createCapabilityBlocker(
-              toolName,
-              input,
-              requirement.capability,
-              requirement.operation,
-              reason,
-            )
-          : undefined,
-      )
+      return { allowed: false, reason: `Tool "${toolName}" denied by rule: ${ruleValueToString(denyMatch)}` }
     }
 
-    if (
-      requirement.capability &&
-      !this.context.capabilities.has(requirement.capability)
-    ) {
-      const blocker = createCapabilityBlocker(
-        toolName,
-        input,
-        requirement.capability,
-        requirement.operation,
-        requirement.reason,
-      )
-      return blockedDecision(blocker.reason, blocker)
-    }
-
-    const askMatch = matchRule(toolName, input, this.context.askRules)
+    const askMatch = matchRule(toolName, _input, this.context.askRules)
     if (askMatch) {
       return { allowed: false, reason: 'ask' }
     }
 
-    const allowMatch = matchRule(toolName, input, this.context.allowRules)
+    const allowMatch = matchRule(toolName, _input, this.context.allowRules)
     if (allowMatch) {
-      return { allowed: true }
-    }
-
-    if (
-      requirement.capability === 'commands.read' ||
-      (requirement.capability &&
-        this.context.approvedCapabilities.has(requirement.capability))
-    ) {
       return { allowed: true }
     }
 
@@ -334,20 +225,14 @@ export class PermissionManager {
       return { allowed: true }
     }
 
-    // Default behaviors for known tools
     const defaultBehavior = TOOL_DEFAULT_PERMISSIONS[toolName]
     if (defaultBehavior === 'allow') {
       return { allowed: true }
     }
 
-    // All other tools default to ask
     return { allowed: false, reason: 'ask' }
   }
 
-  /**
-   * Full permission check with async prompt support.
-   * Used as the `beforeToolCall` hook.
-   */
   async checkPermissionWithPrompt(
     ctx: BeforeToolCallContext,
   ): Promise<BeforeToolCallResult | undefined> {
@@ -357,22 +242,16 @@ export class PermissionManager {
 
     if (decision.allowed) return undefined
 
-    // Denied by rule
     if (decision.reason !== 'ask') {
-      if (decision.blocker) await this.onPermissionBlocked?.(decision.blocker)
       return { block: true, reason: decision.reason }
     }
 
-    // ★ Elegant: for ask_user_question, the permission flow IS the tool's functionality.
-    // Instead of a generic "allow/deny" prompt, we hijack the 'ask' path to run an
-    // interactive Q&A session. Answers are stored on the tool object so execute()
-    // can read them — the tool and the permission system are symbiotic.
+    // AskUserQuestion — permission flow IS the tool's functionality
     if (toolName === ASK_USER_QUESTION_TOOL_NAME && this.onAskUserQuestion) {
       const result = await this.onAskUserQuestion(toolName, input)
       if (result.block) {
         return { block: true, reason: `User cancelled question for "${toolName}"` }
       }
-      // Store answers on the tool object so execute() can read them
       if (result.answers && this.getTool) {
         const tool = this.getTool(toolName) as any
         if (tool?.setAnswers) {
@@ -382,7 +261,6 @@ export class PermissionManager {
       return undefined
     }
 
-    // Ask behavior — prompt user
     if (!this.onPermissionRequest) {
       if (
         this.nonInteractiveStrategy === 'delegate-to-parent' &&
@@ -396,17 +274,6 @@ export class PermissionManager {
           reason: `Permission denied by parent agent for "${toolName}"`,
         }
       }
-
-      const requirement = requiredCapability(toolName, input)
-      if (requirement.capability) {
-        await this.onPermissionBlocked?.(createCapabilityBlocker(
-          toolName,
-          input,
-          requirement.capability,
-          requirement.operation,
-          `Permission approval is required for "${toolName}".`,
-        ))
-      }
       return { block: true, reason: `Permission required for "${toolName}" (non-interactive mode)` }
     }
 
@@ -419,12 +286,9 @@ export class PermissionManager {
 
   private getRuleList(behavior: PermissionBehavior): PermissionRule[] {
     switch (behavior) {
-      case 'allow':
-        return this.context.allowRules
-      case 'deny':
-        return this.context.denyRules
-      case 'ask':
-        return this.context.askRules
+      case 'allow': return this.context.allowRules
+      case 'deny': return this.context.denyRules
+      case 'ask': return this.context.askRules
     }
   }
 

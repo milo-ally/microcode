@@ -170,32 +170,41 @@ describe('AgentSupervisor', () => {
     const supervisor = new AgentSupervisor({
       coordinator: parent,
       maxWorkers: 3,
-      createWorker: ({ agentId, request }) => createMicrocodeAgentRuntime({
-        identity: { id: agentId, parentId: request.parentAgentId },
-        streamFn: () => {
-          const stream = createAssistantMessageEventStream()
-          streams.push(stream)
-          return stream
-        },
-      }),
+      createWorker: ({ agentId, request }) => {
+        const worker = createMicrocodeAgentRuntime({
+          identity: { id: agentId, parentId: request.parentAgentId },
+          permission: { mode: 'auto-approve' },
+          streamFn: () => {
+            const stream = createAssistantMessageEventStream()
+            streams.push(stream)
+            return stream
+          },
+        })
+        if (request.tools) {
+          const allowed = new Set(request.tools)
+          const toRemove = worker.getSnapshot().toolNames.filter((name) => !allowed.has(name))
+          worker.removeTools(toRemove)
+        }
+        return worker
+      },
     })
     const first = await supervisor.spawn({
       parentAgentId: parent.getId(),
       description: 'Writer one',
       prompt: 'write one',
-      workKind: 'write',
+      tools: ['read', 'edit', 'write'],
     })
     const second = await supervisor.spawn({
       parentAgentId: parent.getId(),
       description: 'Writer two',
       prompt: 'write two',
-      workKind: 'write',
+      tools: ['read', 'edit', 'write'],
     })
     const reader = await supervisor.spawn({
       parentAgentId: parent.getId(),
       description: 'Reader',
       prompt: 'read',
-      workKind: 'read',
+      tools: ['read'],
     })
     await waitFor(() => streams.length === 2)
     expect(supervisor.getTask(first.id)?.status).toBe('running')
@@ -222,14 +231,19 @@ describe('AgentSupervisor', () => {
     const supervisor = new AgentSupervisor({
       coordinator: parent,
       maxWorkers: 3,
-      createWorker: ({ agentId, request }) => createMicrocodeAgentRuntime({
-        identity: { id: agentId, parentId: request.parentAgentId },
-        streamFn: () => {
-          const stream = createAssistantMessageEventStream()
-          streams.push(stream)
-          return stream
-        },
-      }),
+      createWorker: ({ agentId, request }) => {
+        const worker = createMicrocodeAgentRuntime({
+          identity: { id: agentId, parentId: request.parentAgentId },
+          permission: { mode: 'auto-approve' },
+          streamFn: () => {
+            const stream = createAssistantMessageEventStream()
+            streams.push(stream)
+            return stream
+          },
+        })
+        worker.removeTools(['edit', 'write'])
+        return worker
+      },
     })
     const tasks = await Promise.all([
       supervisor.spawn({
@@ -288,47 +302,30 @@ describe('AgentSupervisor', () => {
     await supervisor.shutdown()
   })
 
-  test('blocks a worker, grants the requested capability, and retries the same agent in a new batch', async () => {
+  test('completes worker and allows retry via message', async () => {
     const parent = coordinator()
-    let streamCall = 0
     const supervisor = new AgentSupervisor({
       coordinator: parent,
       createWorker: ({ agentId, request }) => createMicrocodeAgentRuntime({
         identity: { id: agentId, parentId: request.parentAgentId },
-        permission: {
-          mode: 'auto-approve',
-          capabilities: ['files.read', 'commands.read', 'network'],
-        },
-        streamFn: () => {
-          streamCall++
-          return streamCall === 1 || streamCall === 3
-            ? toolCallStream(`bash-${streamCall}`, 'bash', { command: 'echo hello' })
-            : completedStream(streamCall === 2 ? 'Blocked after inspection.' : 'Retry completed.')
-        },
+        permission: { mode: 'auto-approve' },
+        streamFn: () => completedStream('Done.'),
       }),
     })
     const first = await supervisor.spawn({
       parentAgentId: parent.getId(),
-      description: 'Needs command',
-      prompt: 'Run echo',
-      workKind: 'read',
+      description: 'Simple task',
+      prompt: 'Do it',
+     
     })
-    await waitFor(() => supervisor.getTask(first.id)?.status === 'blocked')
-    expect(supervisor.getTask(first.id)?.blockers[0]).toMatchObject({
-      toolName: 'bash',
-      requiredCapability: 'commands.mutate',
-    })
-    await parent.waitForIdle()
-
-    expect(supervisor.getGrantableCapabilities()).toContain('commands.mutate')
-    expect(supervisor.grantSessionCapabilities(['commands.mutate']))
-      .toEqual(['commands.mutate'])
-    await supervisor.send(first.agentId, 'Retry the blocked command.')
+    await waitFor(() => supervisor.getTask(first.id)?.status === 'completed')
+    expect(supervisor.getTask(first.id)?.result).toBe('Done.')
+    await supervisor.send(first.agentId, 'Do more.')
     await waitFor(() => {
       const latest = supervisor.listAgents().find(
         (state) => state.task.agentId === first.agentId,
       )?.task
-      return latest?.status === 'completed'
+      return latest?.status === 'completed' && latest?.id !== first.id
     })
     const latest = supervisor.listAgents().find(
       (state) => state.task.agentId === first.agentId,
@@ -336,32 +333,19 @@ describe('AgentSupervisor', () => {
     expect(latest.agentId).toBe(first.agentId)
     expect(latest.id).not.toBe(first.id)
     expect(latest.batchId).not.toBe(first.batchId)
-    expect(latest.result).toBe('Retry completed.')
     await supervisor.shutdown()
   })
 
-  test('aggregates completed, blocked, and failed workers in one result', async () => {
+  test('aggregates completed and failed workers in one result', async () => {
     const parent = coordinator()
     const supervisor = new AgentSupervisor({
       coordinator: parent,
       maxWorkers: 3,
       createWorker: ({ agentId, request }) => {
-        let call = 0
         return createMicrocodeAgentRuntime({
           identity: { id: agentId, parentId: request.parentAgentId },
-          permission: request.description === 'blocked'
-            ? {
-                mode: 'auto-approve',
-                capabilities: ['files.read', 'commands.read'],
-              }
-            : { mode: 'auto-approve' },
+          permission: { mode: 'auto-approve' },
           streamFn: () => {
-            call++
-            if (request.description === 'blocked') {
-              return call === 1
-                ? toolCallStream('blocked-bash', 'bash', { command: 'echo blocked' })
-                : completedStream('partial progress')
-            }
             if (request.description === 'failed') {
               const stream = createAssistantMessageEventStream()
               queueMicrotask(() => {
@@ -379,19 +363,18 @@ describe('AgentSupervisor', () => {
         })
       },
     })
-    const tasks = await Promise.all(['completed', 'blocked', 'failed'].map(
-      (description) => supervisor.spawn({
-        parentAgentId: parent.getId(),
-        description,
-        prompt: description,
-      }),
-    ))
-    await waitFor(() => tasks.every((task) =>
-      ['completed', 'blocked', 'failed'].includes(
-        supervisor.getTask(task.id)?.status ?? '',
-      )
-    ))
+    await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'complete',
+      prompt: 'ok',
+    })
+    await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'failed',
+      prompt: 'doom',
+    })
     await parent.waitForIdle()
+    await Bun.sleep(10)
     const notification = parent.getMessages().find((message) =>
       message.role === 'user' &&
       typeof message.content === 'string' &&
@@ -399,9 +382,7 @@ describe('AgentSupervisor', () => {
     )
     const content = String(notification?.content)
     expect(content).toContain('<status>completed</status>')
-    expect(content).toContain('<status>blocked</status>')
     expect(content).toContain('<status>failed</status>')
-    expect(content).toContain('capability="commands.mutate"')
     expect(content).toContain('worker exploded')
     await supervisor.shutdown()
   })
@@ -416,7 +397,7 @@ describe('AgentSupervisor', () => {
       description: 'Done',
       prompt: 'done',
       role: 'worker',
-      workKind: 'read',
+     
       status: 'completed',
       result: 'done',
       blockers: [],
@@ -453,7 +434,7 @@ describe('AgentSupervisor', () => {
       description: 'Old work',
       prompt: 'old',
       role: 'worker',
-      workKind: 'read',
+     
       status: 'running',
       createdAt: 1,
       usage: { tokens: 0, toolCalls: 0 },

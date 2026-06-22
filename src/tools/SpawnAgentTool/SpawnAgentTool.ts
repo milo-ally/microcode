@@ -4,16 +4,15 @@ import type { PermissionBehavior } from '../../permissions/types.ts'
 import type { AgentSupervisor } from '../../swarm/AgentSupervisor.ts'
 
 export const TOOL_NAME = 'spawn'
-export const TOOL_DEFAULT_PERMISSION: PermissionBehavior = 'allow'
+export const TOOL_DEFAULT_PERMISSION: PermissionBehavior = 'ask'
 
 const spawnSchema = Type.Object({
   description: Type.String({ description: 'Short worker task description.' }),
   prompt: Type.String({ description: 'Complete, self-contained worker instructions.' }),
   role: Type.Optional(Type.String({ description: 'Worker role, such as researcher or implementer.' })),
-  work_kind: Type.Optional(Type.Union([
-    Type.Literal('read'),
-    Type.Literal('write'),
-  ], { description: 'Use write when the worker may modify files.' })),
+  tools: Type.Optional(Type.Array(Type.String(), {
+    description: 'Tool names to grant the worker. If omitted, defaults to read-only tools (read, grep, glob, vision, skill, search).',
+  })),
 }, { additionalProperties: false })
 
 function textResult<T>(text: string, details: T): AgentToolResult<T> {
@@ -27,7 +26,8 @@ export function createSpawnAgentTool(
   return {
     name: TOOL_NAME,
     label: 'Spawn agent',
-    description: 'Launch a new asynchronous worker for a substantial delegated task.',
+    description:
+      'Launch a new asynchronous worker. Set tools to control which tools the worker can use. Workers always run in auto-approve mode.',
     parameters: spawnSchema,
     async execute(_id, input: Static<typeof spawnSchema>) {
       const task = await supervisor.spawn({
@@ -35,7 +35,7 @@ export function createSpawnAgentTool(
         description: input.description,
         prompt: input.prompt,
         role: input.role,
-        workKind: input.work_kind ?? 'read',
+        tools: input.tools,
       })
       return textResult(
         `Launched ${task.agentId} for "${task.description}" (${task.status}). Results will arrive automatically.`,

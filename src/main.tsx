@@ -14,9 +14,11 @@ import {
 import {
   createSpawnAgentTool,
   createSendAgentMessageTool,
+  SEND_AGENT_MESSAGE_TOOL_NAME,
   createStopAgentTool,
+  STOP_AGENT_TOOL_NAME,
   createGetAgentStatusTool,
-  createGrantAgentCapabilitiesTool,
+  GET_AGENT_STATUS_TOOL_NAME,
 } from './tools/index.ts'
 import { type PermissionMode, PERMISSION_MODES } from './permissions/index.ts'
 import { cleanupImageCache } from './utils/imageUtils.ts'
@@ -456,13 +458,10 @@ Session Management:
     createSendAgentMessageTool(supervisor, coordinatorId),
     createStopAgentTool(supervisor, coordinatorId),
     createGetAgentStatusTool(supervisor, coordinatorId),
-    createGrantAgentCapabilitiesTool(supervisor, coordinatorId),
   ])
-  agent.addSessionPermission('spawn')
-  agent.addSessionPermission('message')
-  agent.addSessionPermission('stop')
-  agent.addSessionPermission('status')
-  agent.addSessionPermission('grant')
+  agent.addSessionPermission(SEND_AGENT_MESSAGE_TOOL_NAME)
+  agent.addSessionPermission(STOP_AGENT_TOOL_NAME)
+  agent.addSessionPermission(GET_AGENT_STATUS_TOOL_NAME)
   await supervisor.restore()
 
   // Create TUI app (REPL starts immediately)

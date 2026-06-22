@@ -1,8 +1,13 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import type { PermissionBehavior } from '../permissions/types.ts'
 import { getAllToolDefinitions, getAllDeferredToolDefinitions, getCoreToolDefinitions, getToolDefaultPermissions, registerTool, type ToolCreationContext } from './registry.ts'
-import { createSkillToolWithAgent, TOOL_DEFAULT_PERMISSION as skillDefault } from './SkillTool/SkillTool.ts'
+import { createSkillToolWithAgent, TOOL_DEFAULT_PERMISSION as skillDefault, TOOL_NAME as SKILL_TOOL_NAME } from './SkillTool/SkillTool.ts'
 import { createToolSearchTool, TOOL_SEARCH_TOOL_NAME, type ToolSearchToolOptions } from './ToolSearchTool/ToolSearchTool.ts'
+import { TOOL_NAME as SPAWN_AGENT_TOOL_NAME } from './SpawnAgentTool/SpawnAgentTool.ts'
+import { TOOL_NAME as SEND_AGENT_MESSAGE_TOOL_NAME } from './SendAgentMessageTool/SendAgentMessageTool.ts'
+import { TOOL_NAME as STOP_AGENT_TOOL_NAME } from './StopAgentTool/StopAgentTool.ts'
+import { TOOL_NAME as GET_AGENT_STATUS_TOOL_NAME } from './GetAgentStatusTool/GetAgentStatusTool.ts'
+import { TOOL_NAME as VISION_TOOL_NAME } from './VisionTool/VisionTool.ts'
 
 // Import tool registrations (side effects — each calls registerTool())
 import './BashTool/index.ts'
@@ -36,8 +41,6 @@ export { createSpawnAgentTool, TOOL_NAME as SPAWN_AGENT_TOOL_NAME, TOOL_DEFAULT_
 export { createSendAgentMessageTool, TOOL_NAME as SEND_AGENT_MESSAGE_TOOL_NAME, TOOL_DEFAULT_PERMISSION as SEND_AGENT_MESSAGE_DEFAULT_PERMISSION } from './SendAgentMessageTool/SendAgentMessageTool.ts'
 export { createStopAgentTool, TOOL_NAME as STOP_AGENT_TOOL_NAME, TOOL_DEFAULT_PERMISSION as STOP_AGENT_DEFAULT_PERMISSION } from './StopAgentTool/StopAgentTool.ts'
 export { createGetAgentStatusTool, TOOL_NAME as GET_AGENT_STATUS_TOOL_NAME, TOOL_DEFAULT_PERMISSION as GET_AGENT_STATUS_DEFAULT_PERMISSION } from './GetAgentStatusTool/GetAgentStatusTool.ts'
-export { createGrantAgentCapabilitiesTool, TOOL_NAME as GRANT_AGENT_CAPABILITIES_TOOL_NAME, TOOL_DEFAULT_PERMISSION as GRANT_AGENT_CAPABILITIES_DEFAULT_PERMISSION } from './GrantAgentCapabilitiesTool/GrantAgentCapabilitiesTool.ts'
-
 /** Get the names of all deferred tool definitions (for system prompt listing). */
 export function getDeferredToolNames(): string[] {
   return getAllDeferredToolDefinitions().map(def => def.name)
@@ -46,7 +49,11 @@ export function getDeferredToolNames(): string[] {
 /** Default permission behavior for each built-in tool (tool name → behavior). */
 export const TOOL_DEFAULT_PERMISSIONS: Record<string, PermissionBehavior> = {
   ...getToolDefaultPermissions(),
-  skill: skillDefault,
+  [SKILL_TOOL_NAME]: skillDefault,
+  [SPAWN_AGENT_TOOL_NAME]: 'ask',
+  [SEND_AGENT_MESSAGE_TOOL_NAME]: 'allow',
+  [STOP_AGENT_TOOL_NAME]: 'allow',
+  [GET_AGENT_STATUS_TOOL_NAME]: 'allow',
 }
 
 // ============================================================================
@@ -71,18 +78,18 @@ export function createCodingTools(options: CreateCodingToolsOptions): AgentTool<
   // Create tools from registry (excluding skill, which needs special handling)
   const defs = includeDeferred ? getAllToolDefinitions() : getCoreToolDefinitions()
   for (const def of defs) {
-    if (def.name === 'skill') continue
+    if (def.name === SKILL_TOOL_NAME) continue
     // Skip ToolSearchTool placeholder — it's created separately in agent.ts
     if (def.name === TOOL_SEARCH_TOOL_NAME) continue
     // Skip vision tool if model doesn't support images
-    if (def.name === 'vision' && !modelSupportsImages) continue
+    if (def.name === VISION_TOOL_NAME && !modelSupportsImages) continue
     tools.push(def.createTool(cwd, toolContext))
   }
 
   // SkillTool needs getSkills at creation time
   if (getSkills) {
     registerTool({
-      name: 'skill',
+      name: SKILL_TOOL_NAME,
       defaultPermission: skillDefault,
       createTool: () => createSkillToolWithAgent({ getSkills }),
       formatDescription: (input) =>
