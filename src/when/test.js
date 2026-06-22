@@ -25,29 +25,34 @@ function midnight(d) {
 
 console.log('\nparse()\n-------');
 
+function getParsed(input) {
+  const r = parse(input);
+  return r.parsed;
+}
+
 test('"today" → today at 00:00', () => {
-  const result = parse('today');
+  const result = getParsed('today');
   const expected = midnight(new Date());
   assert.ok(result instanceof Date);
   assert.strictEqual(result.getTime(), expected.getTime());
 });
 
 test('"tomorrow" → tomorrow at 00:00', () => {
-  const result = parse('tomorrow');
+  const result = getParsed('tomorrow');
   const expected = new Date();
   expected.setDate(expected.getDate() + 1);
   assert.strictEqual(result.getTime(), midnight(expected).getTime());
 });
 
 test('"yesterday" → yesterday at 00:00', () => {
-  const result = parse('yesterday');
+  const result = getParsed('yesterday');
   const expected = new Date();
   expected.setDate(expected.getDate() - 1);
   assert.strictEqual(result.getTime(), midnight(expected).getTime());
 });
 
 test('"next Monday" → next Monday (or today if Monday)', () => {
-  const result = parse('next Monday');
+  const result = getParsed('next Monday');
   const now = new Date();
   const target = new Date(now);
   const diff = (1 - now.getDay() + 7) % 7 || 7;
@@ -56,7 +61,7 @@ test('"next Monday" → next Monday (or today if Monday)', () => {
 });
 
 test('"last Friday" → last Friday (or today if Friday)', () => {
-  const result = parse('last Friday');
+  const result = getParsed('last Friday');
   const now = new Date();
   const target = new Date(now);
   let diff = now.getDay() - 5;
@@ -66,14 +71,14 @@ test('"last Friday" → last Friday (or today if Friday)', () => {
 });
 
 test('"in 3 days" → 3 days from now at 00:00', () => {
-  const result = parse('in 3 days');
+  const result = getParsed('in 3 days');
   const expected = new Date();
   expected.setDate(expected.getDate() + 3);
   assert.strictEqual(result.getTime(), midnight(expected).getTime());
 });
 
 test('"2025-12-25" → Dec 25, 2025', () => {
-  const result = parse('2025-12-25');
+  const result = getParsed('2025-12-25');
   assert.ok(result instanceof Date);
   assert.strictEqual(result.getFullYear(), 2025);
   assert.strictEqual(result.getMonth(), 11);
@@ -82,7 +87,7 @@ test('"2025-12-25" → Dec 25, 2025', () => {
 
 test('"blah blah" → null', () => {
   const result = parse('blah blah');
-  assert.strictEqual(result, null);
+  assert.strictEqual(result.parsed, null);
 });
 
 console.log('\nformatDate()\n------------');
