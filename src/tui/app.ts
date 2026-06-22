@@ -2641,7 +2641,6 @@ export class App {
 
     if (!this.supervisor) return
     const states = this.supervisor.listAgents()
-    if (states.length === 0 && !this.coordinatorWorking) return
 
     // ── Build the agent status lines ──
     const now = Date.now()
@@ -2661,9 +2660,17 @@ export class App {
     lines.push(dim('─ Agents ─'))
 
     const activeStates = states.filter((s) => active.has(s.task.status))
+    const showable = new Set(['completed', 'failed', 'blocked'])
     const terminalStates = states
-      .filter((s) => !active.has(s.task.status))
+      .filter((s) => showable.has(s.task.status))
       .sort((a, b) => (b.task.completedAt ?? 0) - (a.task.completedAt ?? 0))
+
+    if (!this.coordinatorWorking && activeStates.length === 0 && terminalStates.length === 0) {
+      for (const w of this.agentTreeWidgets.splice(0)) {
+        this.statusContainer.removeChild(w)
+      }
+      return
+    }
 
     for (let i = 0; i < activeStates.length; i++) {
       const { task, toolHistory, activity } = activeStates[i]
