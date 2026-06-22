@@ -2603,7 +2603,17 @@ export class App {
     this.updateAgentTree()
   }
 
+  private updatingAgentTree = false
+  private agentTreeDirty = false
+
   private updateAgentTree(): void {
+    if (this.updatingAgentTree) {
+      this.agentTreeDirty = true
+      return
+    }
+    this.updatingAgentTree = true
+    this.agentTreeDirty = false
+    try {
     const dim = (s: string) => theme.dim(s)
     const accent = (s: string) => theme.fg('accent', s)
     const active = new Set(['queued', 'running'])
@@ -2726,6 +2736,13 @@ export class App {
     } else if (!hasActive && this.agentTreeTimer) {
       clearInterval(this.agentTreeTimer)
       this.agentTreeTimer = null
+    }
+    } finally {
+      this.updatingAgentTree = false
+      if (this.agentTreeDirty) {
+        this.agentTreeDirty = false
+        this.updateAgentTree()
+      }
     }
   }
 
