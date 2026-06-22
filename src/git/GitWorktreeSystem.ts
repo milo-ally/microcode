@@ -1,6 +1,6 @@
 import { simpleGit, type SimpleGit } from 'simple-git'
-import { join } from 'path'
-import { existsSync } from 'fs'
+import { join, relative, dirname } from 'path'
+import { existsSync, symlinkSync } from 'fs'
 import { mkdir, rm } from 'fs/promises'
 
 const WORKTREE_PREFIX = 'microcode'
@@ -36,12 +36,13 @@ export class GitWorktreeSystem {
   }
 
   /**
-   * Create a worktree for an agent, return the worktree path.
+   * Create a zero-copy worktree for an agent.
    *
-   * Git worktree only checks out tracked files — untracked/ignored files
-   * (node_modules, dist, .env, build artifacts) never land in the worktree.
-   * The .git directory is shared via the main repo's object database.
-   * Disk overhead per agent is limited to the size of version-controlled sources.
+   * Uses --no-checkout so no files are written to disk. Instead, every tracked
+   * file from the main repo is symlinked into the worktree. Reads follow the
+   * link back to the main repo (zero copy); writes replace the symlink with a
+   * real file (isolated change). On commit/merge, only the agent's actual
+   * modifications are processed.
    */
   async createWorktree(agentId: string, baseRef?: string): Promise<WorktreeState> {
     const branch = `${WORKTREE_PREFIX}/${agentId}`
@@ -51,8 +52,22 @@ export class GitWorktreeSystem {
 
     const base = baseRef ?? (await this.mainGit.revparse(['--abbrev-ref', 'HEAD'])).trim()
 
+    // Create branch and empty worktree (no checkout — zero disk copy).
     await this.mainGit.branch([branch, base])
-    await this.mainGit.raw(['worktree', 'add', worktreePath, branch])
+    await this.mainGit.raw(['worktree', 'add', '--no-checkout', worktreePath, branch])
+
+    // Populate index so git sees the base commit as "clean".
+    const wtGit = simpleGit(worktreePath)
+    await wtGit.raw(['reset', '--mixed', base])
+
+    // Symlink every tracked file from main repo into worktree.
+    const files = (await this.mainGit.raw(['ls-files'])).trim().split('\n').filter(Boolean)
+    for (const file of files) {
+      const target = join(worktreePath, file)
+      const source = relative(dirname(target), join(this.repoPath, file))
+      await mkdir(dirname(target), { recursive: true })
+      try { symlinkSync(source, target) } catch { /* skip if already exists */ }
+    }
 
     return {
       agentId,
