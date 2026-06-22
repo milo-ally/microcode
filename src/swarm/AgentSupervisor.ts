@@ -1,6 +1,11 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
+import type {
+  GitWorkTreeMergeResult,
+  GitWorkTreeStatus,
+  GitWorkTreeSystem,
+} from '../git/index.ts'
 import { AgentRegistry } from './AgentRegistry.ts'
 import { AgentTaskStore } from './AgentTaskStore.ts'
 import { createWorkerAgent } from './AgentFactory.ts'
@@ -213,6 +218,7 @@ export interface AgentSupervisorOptions {
   persistence?: AgentTranscriptPersistence
   createWorker?: typeof createWorkerAgent
   configureWorker?: (worker: MicrocodeAgent) => void
+  worktreeSystem?: GitWorkTreeSystem
 }
 
 export class AgentSupervisor {
@@ -224,6 +230,7 @@ export class AgentSupervisor {
   private readonly persistence?: AgentTranscriptPersistence
   private readonly workerFactory: typeof createWorkerAgent
   private readonly configureWorker?: (worker: MicrocodeAgent) => void
+  private readonly worktreeSystem?: GitWorkTreeSystem
   private readonly listeners = new Set<SwarmUIEventListener>()
   private readonly queue: string[] = []
   private readonly activities = new Map<string, string>()
@@ -246,6 +253,7 @@ export class AgentSupervisor {
     this.persistence = options.persistence
     this.workerFactory = options.createWorker ?? createWorkerAgent
     this.configureWorker = options.configureWorker
+    this.worktreeSystem = options.worktreeSystem
     this.registry.register(this.coordinator)
     this.attachCoordinator()
   }
@@ -310,6 +318,7 @@ export class AgentSupervisor {
           role: task.role,
           parentAgentId: task.parentAgentId,
           permissionMode: agent.getPermissionMode(),
+          worktree: this.worktreeSystem?.get(task.agentId),
         })
         agent.abort()
       }
@@ -342,20 +351,24 @@ export class AgentSupervisor {
     for (const meta of this.sleepingAgentMetas) {
       const task = this.tasks.get(meta.taskId)
       if (task) {
-        this.reviveWorker(meta)
+        await this.reviveWorker(meta)
       }
     }
     this.sleepingAgentMetas = []
   }
 
-  private reviveWorker(
+  private async reviveWorker(
     meta: (typeof this.sleepingAgentMetas)[number],
-  ): void {
+  ): Promise<void> {
+    if (meta.worktree && this.worktreeSystem) {
+      await this.worktreeSystem.restore(meta.worktree)
+    }
     const request: SpawnAgentRequest = {
       description: meta.description,
       prompt: meta.prompt,
       role: meta.role,
       parentAgentId: meta.parentAgentId,
+      cwd: meta.worktree?.path,
     }
     const worker = createWorkerAgent({
       parent: this.coordinator,
@@ -365,6 +378,7 @@ export class AgentSupervisor {
     })
     this.configureWorker?.(worker)
     this.registry.register(worker)
+    this.attachWorker(worker, meta.taskId)
     this.emit({
       type: 'swarm:worker-revived',
       workerId: meta.agentId,
@@ -429,16 +443,21 @@ export class AgentSupervisor {
       throw new Error('Agent description and prompt are required.')
     }
 
+    const taskId = createId('task')
+    const agentId = createId('agent')
+    const worktree = this.worktreeSystem
+      ? await this.worktreeSystem.create(agentId)
+      : undefined
+    const workerRequest = worktree
+      ? { ...request, cwd: worktree.path }
+      : request
     const batch = this.ensureOpenBatch()
-    const task = this.tasks.create(request, {
-      taskId: createId('task'),
-      agentId: createId('agent'),
-    }, batch.id)
+    const task = this.tasks.create(workerRequest, { taskId, agentId }, batch.id)
     batch.taskIds.push(task.id)
 
     const worker = this.workerFactory({
       parent: this.coordinator,
-      request,
+      request: workerRequest,
       agentId: task.agentId,
       persistence: this.persistence,
     })
@@ -457,6 +476,9 @@ export class AgentSupervisor {
     const worker = this.registry.get(agentId)
     const previous = this.tasks.getByAgent(agentId)
     if (!worker || !previous) throw new Error(`Agent not found: ${agentId}`)
+    if (this.worktreeSystem && !this.worktreeSystem.get(agentId)) {
+      throw new Error(`Agent ${agentId} no longer has a worktree.`)
+    }
     if (!message.trim()) throw new Error('Message cannot be empty.')
     if (worker.isBusy()) {
       throw new Error(`Agent ${agentId} is still running.`)
@@ -507,6 +529,42 @@ export class AgentSupervisor {
     this.drainQueue()
   }
 
+  async listWorktrees(): Promise<GitWorkTreeStatus[]> {
+    if (!this.worktreeSystem) return []
+    return Promise.all(
+      this.worktreeSystem.list().map((worktree) =>
+        this.worktreeSystem!.status(worktree.agentId)
+      ),
+    )
+  }
+
+  async getWorktreeStatus(agentId: string): Promise<GitWorkTreeStatus> {
+    return this.requireWorktreeSystem().status(agentId)
+  }
+
+  async getWorktreeDiff(agentId: string): Promise<string> {
+    return this.requireWorktreeSystem().diff(agentId)
+  }
+
+  async mergeWorktree(agentId: string): Promise<GitWorkTreeMergeResult> {
+    const task = this.tasks.getByAgent(agentId)
+    if (task?.status === 'queued' || task?.status === 'running') {
+      throw new Error(`Agent ${agentId} is still running.`)
+    }
+    const result = await this.requireWorktreeSystem().merge(agentId)
+    await this.persistManifest()
+    return result
+  }
+
+  async removeWorktree(agentId: string, force = false): Promise<void> {
+    const task = this.tasks.getByAgent(agentId)
+    if (task?.status === 'queued' || task?.status === 'running') {
+      throw new Error(`Agent ${agentId} is still running.`)
+    }
+    await this.requireWorktreeSystem().remove(agentId, force)
+    await this.persistManifest()
+  }
+
   /** Permanently delete an agent and all its traces. */
   async delete(agentId: string): Promise<void> {
     const worker = this.registry.get(agentId)
@@ -525,6 +583,9 @@ export class AgentSupervisor {
     this.unsubscribers.get(agentId)?.()
     this.unsubscribers.delete(agentId)
     this.registry.remove(agentId)
+    this.sleepingAgentMetas = this.sleepingAgentMetas.filter(
+      (meta) => meta.agentId !== agentId,
+    )
 
     // Emit final event before removal so TUI can update agent tree.
     if (task.status !== 'cancelled') {
@@ -548,6 +609,10 @@ export class AgentSupervisor {
       batch.taskIds = batch.taskIds.filter((id) => id !== task.id)
     }
 
+    if (this.worktreeSystem?.get(agentId)) {
+      await this.worktreeSystem.remove(agentId, true)
+    }
+    await this.persistManifest()
     this.drainQueue()
   }
 
@@ -943,8 +1008,16 @@ export class AgentSupervisor {
         role: task.role,
         parentAgentId: task.parentAgentId,
         permissionMode: agent.getPermissionMode(),
+        worktree: this.worktreeSystem?.get(agent.getId()),
       })
     }
     return metas
+  }
+
+  private requireWorktreeSystem(): GitWorkTreeSystem {
+    if (!this.worktreeSystem) {
+      throw new Error('Git worktree support is not configured.')
+    }
+    return this.worktreeSystem
   }
 }

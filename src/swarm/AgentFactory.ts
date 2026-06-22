@@ -14,6 +14,9 @@ import { TOOL_NAME as SPAWN_TOOL_NAME } from '../tools/SpawnAgentTool/SpawnAgent
 import { TOOL_NAME as MESSAGE_TOOL_NAME } from '../tools/SendAgentMessageTool/SendAgentMessageTool.ts'
 import { TOOL_NAME as STOP_TOOL_NAME } from '../tools/StopAgentTool/StopAgentTool.ts'
 import { TOOL_NAME as STATUS_TOOL_NAME } from '../tools/GetAgentStatusTool/GetAgentStatusTool.ts'
+import { TOOL_NAME as BASH_TOOL_NAME } from '../tools/BashTool/BashTool.ts'
+import { TOOL_NAME as EDIT_TOOL_NAME } from '../tools/FileEditTool/FileEditTool.ts'
+import { TOOL_NAME as WRITE_TOOL_NAME } from '../tools/FileWriteTool/FileWriteTool.ts'
 
 const ALWAYS_DENIED = new Set([
   TASK_TOOL_NAME,
@@ -31,6 +34,9 @@ const DEFAULT_TOOLS = [
   VISION_TOOL_NAME,
   SKILL_TOOL_NAME,
   TOOL_SEARCH_TOOL_NAME,
+  BASH_TOOL_NAME,
+  EDIT_TOOL_NAME,
+  WRITE_TOOL_NAME,
 ]
 
 export function getDefaultWorkerTools(): string[] {

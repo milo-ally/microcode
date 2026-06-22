@@ -1,5 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { MicrocodeAgent } from '../agent/index.ts'
+import type { GitWorkTree } from '../git/index.ts'
 import type { PermissionMode } from '../permissions/index.ts'
 
 export type AgentTaskStatus =
@@ -83,6 +84,7 @@ export interface AgentMeta {
   role: string
   parentAgentId: string
   permissionMode: PermissionMode | undefined
+  worktree?: GitWorkTree
 }
 
 export interface AgentTranscriptPersistence {

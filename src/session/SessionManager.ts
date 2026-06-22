@@ -230,7 +230,7 @@ export class SessionManager implements AgentSessionPersistence {
     await mkdir(dir, { recursive: true })
     await this.atomicWrite(
       path.join(dir, 'manifest.json'),
-      JSON.stringify({ version: 2, tasks, batches, agentMetas }, null, 2),
+      JSON.stringify({ version: 3, tasks, batches, agentMetas }, null, 2),
     )
   }
 

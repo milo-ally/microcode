@@ -42,6 +42,7 @@ export { createSendAgentMessageTool, TOOL_NAME as SEND_AGENT_MESSAGE_TOOL_NAME, 
 export { createStopAgentTool, TOOL_NAME as STOP_AGENT_TOOL_NAME, TOOL_DEFAULT_PERMISSION as STOP_AGENT_DEFAULT_PERMISSION } from './StopAgentTool/StopAgentTool.ts'
 export { createDeleteAgentTool, TOOL_NAME as DELETE_AGENT_TOOL_NAME, TOOL_DEFAULT_PERMISSION as DELETE_AGENT_DEFAULT_PERMISSION } from './DeleteAgentTool/DeleteAgentTool.ts'
 export { createGetAgentStatusTool, TOOL_NAME as GET_AGENT_STATUS_TOOL_NAME, TOOL_DEFAULT_PERMISSION as GET_AGENT_STATUS_DEFAULT_PERMISSION } from './GetAgentStatusTool/GetAgentStatusTool.ts'
+export { createGitWorkTreeTool, TOOL_NAME as GIT_WORKTREE_TOOL_NAME, TOOL_DEFAULT_PERMISSION as GIT_WORKTREE_DEFAULT_PERMISSION } from './GitWorkTreeTool/GitWorkTreeTool.ts'
 /** Get the names of all deferred tool definitions (for system prompt listing). */
 export function getDeferredToolNames(): string[] {
   return getAllDeferredToolDefinitions().map(def => def.name)

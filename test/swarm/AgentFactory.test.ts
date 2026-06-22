@@ -35,7 +35,7 @@ describe('AgentFactory permissions', () => {
     expect(worker.hasTool('task')).toBe(false)
   })
 
-  test('read workers get only read tools', () => {
+  test('workers get read and write tools by default', () => {
     const parent = createMicrocodeAgentRuntime({
       identity: { id: 'parent' },
       permission: { mode: 'auto-approve' },
@@ -53,8 +53,9 @@ describe('AgentFactory permissions', () => {
     expect(worker.getPermissionMode()).toBe('auto-approve')
     expect(worker.hasTool('read')).toBe(true)
     expect(worker.hasTool('grep')).toBe(true)
-    expect(worker.hasTool('edit')).toBe(false)
-    expect(worker.hasTool('write')).toBe(false)
+    expect(worker.hasTool('bash')).toBe(true)
+    expect(worker.hasTool('edit')).toBe(true)
+    expect(worker.hasTool('write')).toBe(true)
   })
 
   test('write workers get read + write tools', () => {

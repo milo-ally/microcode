@@ -12,7 +12,7 @@ const spawnSchema = Type.Object({
   role: Type.Optional(Type.String({ description: 'Worker role, such as researcher or implementer.' })),
   tools: Type.Optional(Type.Array(Type.String(), {
     
-    description: 'Tool names to grant the worker. If omitted, defaults to read-only tools (read, grep, glob, vision, skill, search).',
+    description: 'Tool names to grant the worker. If omitted, defaults to the standard read/write coding tools.',
   })),
 }, { additionalProperties: false })
 
@@ -28,7 +28,7 @@ export function createSpawnAgentTool(
     name: TOOL_NAME,
     label: 'Spawn agent',
     description:
-      'Launch a new asynchronous worker. Set tools to control which tools the worker can use. Workers always run in auto-approve mode.',
+      'Launch a new asynchronous worker in its own Git worktree. Set tools to control which tools the worker can use. Workers always run in auto-approve mode.',
     parameters: spawnSchema,
     async execute(
       _id: string,

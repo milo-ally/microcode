@@ -21,9 +21,12 @@ import {
   GET_AGENT_STATUS_TOOL_NAME,
   createDeleteAgentTool,
   DELETE_AGENT_TOOL_NAME,
+  createGitWorkTreeTool,
+  GIT_WORKTREE_TOOL_NAME,
 } from './tools/index.ts'
 import { type PermissionMode, PERMISSION_MODES } from './permissions/index.ts'
 import { cleanupImageCache } from './utils/imageUtils.ts'
+import { GitWorkTreeSystem } from './git/index.ts'
 
 declare const MACRO: {
   VERSION: string
@@ -331,6 +334,13 @@ Session Management:
   }
 
   const cwd = process.cwd()
+  let worktreeSystem: GitWorkTreeSystem
+  try {
+    worktreeSystem = await GitWorkTreeSystem.open(cwd)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
   const resumeFlagIdx = args.indexOf('--resume')
   const resumeFlag = resumeFlagIdx !== -1
   // Session ID is the arg after --resume, if it exists and isn't another flag
@@ -442,6 +452,7 @@ Session Management:
   const supervisor = new AgentSupervisor({
     coordinator: agent,
     persistence: sessionManager,
+    worktreeSystem,
     maxWorkers: positiveInt(process.env.MICROCODE_MAX_WORKERS, 4),
     timeoutMs: positiveInt(
       process.env.MICROCODE_AGENT_TIMEOUT_MS,
@@ -461,12 +472,14 @@ Session Management:
     createStopAgentTool(supervisor, coordinatorId),
     createGetAgentStatusTool(supervisor, coordinatorId),
     createDeleteAgentTool(supervisor, coordinatorId),
+    createGitWorkTreeTool(supervisor),
   ]
   agent.addTools(swarmTools)
   agent.addSessionPermission(SEND_AGENT_MESSAGE_TOOL_NAME)
   agent.addSessionPermission(STOP_AGENT_TOOL_NAME)
   agent.addSessionPermission(GET_AGENT_STATUS_TOOL_NAME)
   agent.addSessionPermission(DELETE_AGENT_TOOL_NAME)
+  agent.addSessionPermission(GIT_WORKTREE_TOOL_NAME)
   await supervisor.restore()
 
   // Create TUI app (REPL starts immediately)
