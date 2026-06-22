@@ -52,8 +52,9 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
     ? request.tools.filter((name) => parentToolNames.has(name))
     : DEFAULT_TOOLS.filter((name) => parentToolNames.has(name))
 
+  const cwd = request.cwd ?? parentSnapshot.cwd
   const worker = createMicrocodeAgentRuntime({
-    cwd: request.cwd ?? parentSnapshot.cwd,
+    cwd,
     modelId: request.modelId ?? parentSnapshot.model.id,
     thinkingLevel: parent.getThinkingLevel(),
     identity: {
@@ -68,6 +69,7 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
     systemPromptSuffix: getWorkerPrompt(
       request.parentAgentId,
       request.description,
+      cwd,
       allowed.filter((name) => !ALWAYS_DENIED.has(name)),
     ),
   })
