@@ -169,18 +169,34 @@ export class GitWorkTreeSystem {
 
   async diff(agentId: string): Promise<string> {
     const worktree = this.require(agentId)
-    const [diff, untracked] = await Promise.all([
+    const [trackedDiff, untracked, aheadText] = await Promise.all([
       this.git(['diff', '--no-ext-diff', '--binary', worktree.baseCommit], worktree.path),
       this.git(
         ['ls-files', '--others', '--exclude-standard'],
         worktree.path,
       ),
+      this.git(
+        ['rev-list', '--count', `${worktree.baseCommit}..${worktree.branch}`],
+        worktree.path,
+      ),
     ])
     const untrackedFiles = untracked.split('\n').filter(Boolean)
-    const suffix = untrackedFiles.length > 0
-      ? `\n\nUntracked files:\n${untrackedFiles.map((file) => `- ${file}`).join('\n')}`
-      : ''
-    return `${diff.trim()}${suffix}`.trim()
+    const ahead = Number.parseInt(aheadText.trim(), 10) || 0
+
+    const parts: string[] = []
+    parts.push(`agent: ${agentId}`)
+    parts.push(`commits ahead of base: ${ahead}`)
+    parts.push(`untracked files: ${untrackedFiles.length > 0 ? untrackedFiles.join(', ') : '(none)'}`)
+
+    if (trackedDiff.trim()) {
+      parts.push(`\n${trackedDiff.trim()}`)
+    } else if (ahead === 0 && untrackedFiles.length === 0) {
+      parts.push(`(no tracked changes, no untracked files — agent produced no output in this worktree)`)
+    } else if (ahead === 0 && untrackedFiles.length > 0) {
+      parts.push(`(agent wrote files but did not commit — merge will auto-stage and commit)`)
+    }
+
+    return parts.join('\n')
   }
 
   async merge(agentId: string): Promise<GitWorkTreeMergeResult> {
