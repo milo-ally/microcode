@@ -48,7 +48,8 @@ export function createSpawnAgentTool(
         tools: input.tools,
       })
       return textResult(
-        `Launched ${task.agentId} for "${task.description}" (${task.status}). Results will arrive automatically.`,
+        `Launched ${task.agentId} for "${task.description}" (${task.status}) in batch ${task.batchId}. ` +
+        `After launching the rest of this batch, call worktree with action="wait" and batch_id="${task.batchId}" once. Do not poll list or status.`,
         task,
       )
     },

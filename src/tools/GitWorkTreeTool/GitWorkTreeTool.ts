@@ -11,11 +11,18 @@ const schema = Type.Object({
     Type.Literal('list'),
     Type.Literal('status'),
     Type.Literal('diff'),
+    Type.Literal('wait'),
     Type.Literal('merge'),
     Type.Literal('remove'),
   ]),
   agent_id: Type.Optional(Type.String({
     description: 'Agent ID. Required for status, diff, merge, and remove.',
+  })),
+  batch_id: Type.Optional(Type.String({
+    description: 'Batch ID. Required for wait.',
+  })),
+  timeout: Type.Optional(Type.Number({
+    description: 'Maximum seconds to wait. Agents continue running after a timeout.',
   })),
   force: Type.Optional(Type.Boolean({
     description: 'Allow removal of a worktree with unmerged changes.',
@@ -33,18 +40,49 @@ export function createGitWorkTreeTool(
     name: TOOL_NAME,
     label: 'Worktree',
     description:
-      'Inspect, diff, merge, or remove isolated Git worktrees used by delegated agents.',
+      'Wait for agent batches and inspect, diff, merge, or remove their isolated Git worktrees.',
     parameters: schema,
-    async execute(_id, input: Static<typeof schema>) {
+    async execute(
+      _id,
+      input: Static<typeof schema>,
+      signal?: AbortSignal,
+      onUpdate?: (partial: AgentToolResult<unknown>) => void,
+    ) {
       if (input.action === 'list') {
         const worktrees = await supervisor.listWorktrees()
         const text = worktrees.length === 0
           ? 'No agent worktrees.'
           : worktrees.map((item) =>
-              `${item.agentId} ${item.branch} changes=${item.changes.length} ahead=${item.ahead}` +
-              `${item.integratedAt ? ' merged' : ''}`
+              `${item.agentId} ${item.phase} ${item.branch} ` +
+              `changes=${item.changes.length} ahead=${item.ahead}` +
+              `${item.mergeable ? ' mergeable' : ''}`
             ).join('\n')
         return textResult(text, { worktrees })
+      }
+
+      if (input.action === 'wait') {
+        if (!input.batch_id) {
+          throw new Error('batch_id is required for worktree wait.')
+        }
+        const tasks = await supervisor.waitForBatch(input.batch_id, {
+          signal,
+          timeoutMs: input.timeout ? input.timeout * 1000 : undefined,
+          onProgress: (progress) => {
+            onUpdate?.({
+              content: [{
+                type: 'text',
+                text:
+                  `Waiting for agent batch ${progress.batchId}: ` +
+                  `${progress.completed}/${progress.total} complete.`,
+              }],
+              details: progress,
+            })
+          },
+        })
+        return textResult(
+          `Agent batch ${input.batch_id} completed. Results are ready and the automatic agent-results notification will follow.`,
+          { batchId: input.batch_id, tasks },
+        )
       }
 
       if (!input.agent_id) {
@@ -55,7 +93,7 @@ export function createGitWorkTreeTool(
         const status = await supervisor.getWorktreeStatus(input.agent_id)
         return textResult(
           `${status.agentId} ${status.branch}\n` +
-          `Path: ${status.path}\nAhead: ${status.ahead}\n` +
+          `Phase: ${status.phase}\nPath: ${status.path}\nAhead: ${status.ahead}\n` +
           (status.changes.length > 0 ? status.changes.join('\n') : 'Clean'),
           status,
         )

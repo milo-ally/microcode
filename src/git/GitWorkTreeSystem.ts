@@ -44,6 +44,7 @@ export class GitWorkTreeSystem {
   readonly repositoryRoot: string
   readonly worktreesRoot: string
   private readonly worktrees = new Map<string, GitWorkTree>()
+  private mutationQueue: Promise<void> = Promise.resolve()
 
   private constructor(repositoryRoot: string, options: GitWorkTreeSystemOptions) {
     this.repositoryRoot = repositoryRoot
@@ -86,6 +87,10 @@ export class GitWorkTreeSystem {
   }
 
   async create(agentId: string): Promise<GitWorkTree> {
+    return this.withMutation(() => this.createUnlocked(agentId))
+  }
+
+  private async createUnlocked(agentId: string): Promise<GitWorkTree> {
     const existing = this.worktrees.get(agentId)
     if (existing) return { ...existing }
     this.assertAgentId(agentId)
@@ -121,6 +126,10 @@ export class GitWorkTreeSystem {
   }
 
   async restore(worktree: GitWorkTree): Promise<GitWorkTree> {
+    return this.withMutation(() => this.restoreUnlocked(worktree))
+  }
+
+  private async restoreUnlocked(worktree: GitWorkTree): Promise<GitWorkTree> {
     this.assertAgentId(worktree.agentId)
     try {
       await access(worktree.path)
@@ -175,6 +184,10 @@ export class GitWorkTreeSystem {
   }
 
   async merge(agentId: string): Promise<GitWorkTreeMergeResult> {
+    return this.withMutation(() => this.mergeUnlocked(agentId))
+  }
+
+  private async mergeUnlocked(agentId: string): Promise<GitWorkTreeMergeResult> {
     const worktree = this.require(agentId)
     await this.assertMainWorkspaceClean()
 
@@ -229,6 +242,10 @@ export class GitWorkTreeSystem {
   }
 
   async remove(agentId: string, force = false): Promise<void> {
+    return this.withMutation(() => this.removeUnlocked(agentId, force))
+  }
+
+  private async removeUnlocked(agentId: string, force: boolean): Promise<void> {
     const worktree = this.require(agentId)
     const status = await this.status(agentId)
     const merged = await this.isAncestor(worktree.branch, 'HEAD')
@@ -275,6 +292,35 @@ export class GitWorkTreeSystem {
       const exitCode = (error as { code?: number | string }).code
       if (exitCode === 1) return false
       throw new Error(commandError(error))
+    }
+  }
+
+  private withMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutationQueue
+      .catch(() => undefined)
+      .then(() => this.retryLockedOperation(operation))
+    this.mutationQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  private async retryLockedOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const delays = [100, 250, 500]
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await operation()
+      } catch (error) {
+        const message = commandError(error)
+        const locked = /index\.lock|another git process|could not lock/i.test(message)
+        if (!locked || attempt >= delays.length) {
+          if (locked) {
+            throw new Error(
+              `The Git repository is temporarily locked. Wait for the other Git operation to finish and retry. ${message}`,
+            )
+          }
+          throw error
+        }
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, delays[attempt]))
+      }
     }
   }
 

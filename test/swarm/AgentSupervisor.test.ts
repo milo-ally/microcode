@@ -305,6 +305,51 @@ describe('AgentSupervisor', () => {
     await supervisor.shutdown()
   })
 
+  test('waits for a batch through task events without polling', async () => {
+    const parent = coordinator()
+    const streams: AssistantMessageEventStream[] = []
+    const progress: Array<{ completed: number; total: number }> = []
+    const supervisor = new AgentSupervisor({
+      coordinator: parent,
+      maxWorkers: 2,
+      createWorker: ({ agentId, request }) => createMicrocodeAgentRuntime({
+        identity: { id: agentId, parentId: request.parentAgentId },
+        streamFn: () => {
+          const stream = createAssistantMessageEventStream()
+          streams.push(stream)
+          return stream
+        },
+      }),
+    })
+    const first = await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'one',
+      prompt: 'one',
+    })
+    await supervisor.spawn({
+      parentAgentId: parent.getId(),
+      description: 'two',
+      prompt: 'two',
+    })
+    await waitFor(() => streams.length === 2)
+
+    const waiting = supervisor.waitForBatch(first.batchId, {
+      onProgress: ({ completed, total }) => progress.push({ completed, total }),
+    })
+    const done = response('done')
+    streams[0]!.push({ type: 'start', partial: done })
+    streams[0]!.push({ type: 'done', reason: 'stop', message: done })
+    await waitFor(() => progress.some((item) => item.completed === 1))
+    streams[1]!.push({ type: 'start', partial: done })
+    streams[1]!.push({ type: 'done', reason: 'stop', message: done })
+
+    const tasks = await waiting
+    expect(tasks).toHaveLength(2)
+    expect(tasks.every((task) => task.status === 'completed')).toBe(true)
+    expect(progress.at(-1)).toEqual({ completed: 2, total: 2 })
+    await supervisor.shutdown()
+  })
+
   test('completes worker and allows retry via message', async () => {
     const parent = coordinator()
     const supervisor = new AgentSupervisor({

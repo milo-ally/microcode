@@ -15,6 +15,7 @@ import type {
   AgentMeta,
   AgentRuntimeState,
   AgentTask,
+  AgentWorktreeStatus,
   AgentTranscriptPersistence,
   SwarmUIEvent,
   SwarmUIEventListener,
@@ -529,17 +530,21 @@ export class AgentSupervisor {
     this.drainQueue()
   }
 
-  async listWorktrees(): Promise<GitWorkTreeStatus[]> {
+  async listWorktrees(): Promise<AgentWorktreeStatus[]> {
     if (!this.worktreeSystem) return []
     return Promise.all(
-      this.worktreeSystem.list().map((worktree) =>
-        this.worktreeSystem!.status(worktree.agentId)
+      this.worktreeSystem.list().map(async (worktree) =>
+        this.decorateWorktreeStatus(
+          await this.worktreeSystem!.status(worktree.agentId),
+        )
       ),
     )
   }
 
-  async getWorktreeStatus(agentId: string): Promise<GitWorkTreeStatus> {
-    return this.requireWorktreeSystem().status(agentId)
+  async getWorktreeStatus(agentId: string): Promise<AgentWorktreeStatus> {
+    return this.decorateWorktreeStatus(
+      await this.requireWorktreeSystem().status(agentId),
+    )
   }
 
   async getWorktreeDiff(agentId: string): Promise<string> {
@@ -548,8 +553,11 @@ export class AgentSupervisor {
 
   async mergeWorktree(agentId: string): Promise<GitWorkTreeMergeResult> {
     const task = this.tasks.getByAgent(agentId)
+    if (!task) throw new Error(`Agent not found: ${agentId}`)
     if (task?.status === 'queued' || task?.status === 'running') {
-      throw new Error(`Agent ${agentId} is still running.`)
+      throw new Error(
+        `Agent ${agentId} is ${task.status}. Wait for its completion notification before merging.`,
+      )
     }
     const result = await this.requireWorktreeSystem().merge(agentId)
     await this.persistManifest()
@@ -563,6 +571,90 @@ export class AgentSupervisor {
     }
     await this.requireWorktreeSystem().remove(agentId, force)
     await this.persistManifest()
+  }
+
+  async waitForBatch(
+    batchId: string,
+    options: {
+      signal?: AbortSignal
+      timeoutMs?: number
+      onProgress?: (progress: {
+        batchId: string
+        completed: number
+        total: number
+        agents: Array<{ agentId: string; status: AgentTask['status'] }>
+      }) => void
+    } = {},
+  ): Promise<Readonly<AgentTask>[]> {
+    const batch = this.batches.get(batchId)
+    if (!batch) throw new Error(`Agent batch not found: ${batchId}`)
+    if (batch.status === 'open') {
+      batch.status = 'sealed'
+      batch.sealedAt = Date.now()
+      if (this.currentCoordinatorTurnId === batch.coordinatorTurnId) {
+        this.currentCoordinatorTurnId = undefined
+      }
+      void this.persistManifest()
+    }
+
+    const snapshot = () => batch.taskIds
+      .map((taskId) => this.tasks.get(taskId))
+      .filter((task): task is Readonly<AgentTask> => Boolean(task))
+    const isTerminal = (task: Readonly<AgentTask>) =>
+      task.status !== 'queued' && task.status !== 'running'
+    const emitProgress = () => {
+      const tasks = snapshot()
+      options.onProgress?.({
+        batchId,
+        completed: tasks.filter(isTerminal).length,
+        total: batch.taskIds.length,
+        agents: tasks.map((task) => ({
+          agentId: task.agentId,
+          status: task.status,
+        })),
+      })
+      return tasks
+    }
+
+    const current = emitProgress()
+    if (current.length === batch.taskIds.length && current.every(isTerminal)) {
+      this.tryDeliverBatch(batchId)
+      return current
+    }
+
+    return new Promise<Readonly<AgentTask>[]>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const cleanup = () => {
+        unsubscribe()
+        if (timer) clearTimeout(timer)
+        options.signal?.removeEventListener('abort', onAbort)
+      }
+      const check = () => {
+        const tasks = emitProgress()
+        if (tasks.length === batch.taskIds.length && tasks.every(isTerminal)) {
+          cleanup()
+          this.tryDeliverBatch(batchId)
+          resolve(tasks)
+        }
+      }
+      const unsubscribe = this.subscribe((event) => {
+        if ('task' in event && event.task.batchId === batchId) check()
+      })
+      const onAbort = () => {
+        cleanup()
+        reject(new Error(`Waiting for agent batch ${batchId} was cancelled.`))
+      }
+      options.signal?.addEventListener('abort', onAbort, { once: true })
+      if (options.timeoutMs && options.timeoutMs > 0) {
+        timer = setTimeout(() => {
+          cleanup()
+          reject(new Error(
+            `Timed out waiting for agent batch ${batchId}. Agents continue running; wait again instead of polling.`,
+          ))
+        }, options.timeoutMs)
+      }
+      check()
+    })
   }
 
   /** Permanently delete an agent and all its traces. */
@@ -938,11 +1030,14 @@ export class AgentSupervisor {
     return batch
   }
 
-  private scheduleBatchSeal(): void {
+  private scheduleBatchSeal(delayMs = 0): void {
     if (this.sealTimer) clearTimeout(this.sealTimer)
     this.sealTimer = setTimeout(() => {
       this.sealTimer = null
-      if (this.coordinator.isBusy()) return
+      if (this.coordinator.isBusy()) {
+        this.scheduleBatchSeal(25)
+        return
+      }
       for (const batch of this.batches.values()) {
         if (batch.status === 'open') {
           batch.status = 'sealed'
@@ -952,7 +1047,7 @@ export class AgentSupervisor {
       }
       this.currentCoordinatorTurnId = undefined
       void this.persistManifest()
-    }, 0)
+    }, delayMs)
   }
 
   private xmlEscape(value: string): string {
@@ -1019,5 +1114,28 @@ export class AgentSupervisor {
       throw new Error('Git worktree support is not configured.')
     }
     return this.worktreeSystem
+  }
+
+  private decorateWorktreeStatus(
+    status: GitWorkTreeStatus,
+  ): AgentWorktreeStatus {
+    const task = this.tasks.getByAgent(status.agentId)
+    const taskStatus = task?.status
+    const phase = status.integratedAt
+      ? 'merged'
+      : taskStatus === 'queued'
+        ? 'pending'
+        : taskStatus === 'running'
+          ? 'running'
+          : taskStatus === 'completed'
+            ? 'ready'
+            : 'failed'
+    return {
+      ...status,
+      taskStatus,
+      phase,
+      mergeable:
+        phase === 'ready' && (status.changes.length > 0 || status.ahead > 0),
+    }
   }
 }

@@ -97,4 +97,25 @@ describe('GitWorkTreeSystem', () => {
       'main Git workspace has uncommitted changes',
     )
   })
+
+  test('serializes concurrent merges in one repository', async () => {
+    const { repository, worktreesRoot } = await createRepository()
+    const system = await GitWorkTreeSystem.open(repository, { worktreesRoot })
+    const first = await system.create('agent-one')
+    const second = await system.create('agent-two')
+    await writeFile(join(first.path, 'one.txt'), 'one\n')
+    await writeFile(join(second.path, 'two.txt'), 'two\n')
+
+    const results = await Promise.all([
+      system.merge('agent-one'),
+      system.merge('agent-two'),
+    ])
+
+    expect(results.every((result) => result.merged)).toBe(true)
+    expect(await readFile(join(repository, 'one.txt'), 'utf8')).toBe('one\n')
+    expect(await readFile(join(repository, 'two.txt'), 'utf8')).toBe('two\n')
+    expect((await git(repository, ['status', '--porcelain=v1'])).trim()).toBe('')
+    await system.remove('agent-one')
+    await system.remove('agent-two')
+  })
 })

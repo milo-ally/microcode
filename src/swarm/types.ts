@@ -1,6 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { MicrocodeAgent } from '../agent/index.ts'
-import type { GitWorkTree } from '../git/index.ts'
+import type { GitWorkTree, GitWorkTreeStatus } from '../git/index.ts'
 import type { PermissionMode } from '../permissions/index.ts'
 
 export type AgentTaskStatus =
@@ -62,6 +62,19 @@ export interface AgentRuntimeState {
   identity: ReturnType<MicrocodeAgent['getIdentity']>
   activity?: string
   toolHistory: readonly { name: string; done: boolean; error: boolean; detail?: string; startedAt?: number; status?: string }[]
+}
+
+export type AgentWorktreePhase =
+  | 'pending'
+  | 'running'
+  | 'ready'
+  | 'failed'
+  | 'merged'
+
+export interface AgentWorktreeStatus extends GitWorkTreeStatus {
+  taskStatus?: AgentTaskStatus
+  phase: AgentWorktreePhase
+  mergeable: boolean
 }
 
 export type SwarmUIEvent =
