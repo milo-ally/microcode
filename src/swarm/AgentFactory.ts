@@ -19,6 +19,7 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
       ? 'interactive'
       : requestedMode
 
+      
   const worker = createMicrocodeAgentRuntime({
     cwd: request.cwd ?? parentSnapshot.cwd,
     modelId: request.modelId ?? parentSnapshot.model.id,

@@ -3,7 +3,7 @@ import { Type, type Static } from 'typebox'
 import type { PermissionBehavior } from '../../permissions/types.ts'
 import type { AgentSupervisor } from '../../swarm/AgentSupervisor.ts'
 
-export const TOOL_NAME = 'send_agent_message'
+export const TOOL_NAME = 'message'
 export const TOOL_DEFAULT_PERMISSION: PermissionBehavior = 'allow'
 
 const sendSchema = Type.Object({
