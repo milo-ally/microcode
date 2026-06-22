@@ -47,7 +47,6 @@ export function formatBytes(bytes: number): string {
   const precision = value < 10 ? 1 : 0
   return `${value.toFixed(precision)} ${units[unitIndex]}`
 }
-
 export function countContentLines(content: string): number {
   if (content.length === 0) return 0
 

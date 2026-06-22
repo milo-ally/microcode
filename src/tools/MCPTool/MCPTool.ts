@@ -57,7 +57,13 @@ export function createMcpTool(
     async execute(
       _toolCallId: string,
       params: unknown,
+      _signal?: AbortSignal,
+      onUpdate?: (partial: AgentToolResult<any>) => void,
     ): Promise<AgentToolResult<any>> {
+      onUpdate?.({
+        content: [{ type: 'text', text: `Calling ${toolInfo.serverName}/${toolInfo.name}...` }],
+        details: {},
+      })
       try {
         const result = await clientManager.callTool(
           toolInfo.serverName,

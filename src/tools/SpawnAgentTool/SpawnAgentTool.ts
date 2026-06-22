@@ -30,7 +30,16 @@ export function createSpawnAgentTool(
     description:
       'Launch a new asynchronous worker. Set tools to control which tools the worker can use. Workers always run in auto-approve mode.',
     parameters: spawnSchema,
-    async execute(_id, input: Static<typeof spawnSchema>) {
+    async execute(
+      _id: string,
+      input: Static<typeof spawnSchema>,
+      _signal?: AbortSignal,
+      onUpdate?: (partial: AgentToolResult<unknown>) => void,
+    ) {
+      onUpdate?.({
+        content: [{ type: 'text', text: `Launching agent: ${input.description}` }],
+        details: { description: input.description },
+      })
       const task = await supervisor.spawn({
         parentAgentId: coordinatorId,
         description: input.description,

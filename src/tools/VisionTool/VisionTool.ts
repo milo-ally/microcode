@@ -36,14 +36,20 @@ export function createVisionTool(cwd: string): AgentTool<typeof VisionToolSchema
     async execute(
       _toolCallId: string,
       params: VisionToolInput,
+      _signal?: AbortSignal,
+      onUpdate?: (partial: AgentToolResult<VisionToolDetails>) => void,
     ): Promise<AgentToolResult<VisionToolDetails>> {
       const { image_source, prompt } = params
+      const sourceType: 'url' | 'file' = (image_source.startsWith('http://') || image_source.startsWith('https://')) ? 'url' : 'file'
+
+      onUpdate?.({
+        content: [{ type: 'text', text: `Analyzing ${image_source}...` }],
+        details: { source: image_source, sourceType, mimeType: '...' },
+      })
       let base64Data: string
       let mimeType: string
-      let sourceType: 'url' | 'file'
 
-      if (image_source.startsWith('http://') || image_source.startsWith('https://')) {
-        sourceType = 'url'
+      if (sourceType === 'url') {
         try {
           const response = await fetch(image_source)
           if (!response.ok) {
@@ -59,7 +65,6 @@ export function createVisionTool(cwd: string): AgentTool<typeof VisionToolSchema
           )
         }
       } else {
-        sourceType = 'file'
         const resolvedPath = isAbsolute(image_source)
           ? image_source
           : resolve(cwd, image_source)

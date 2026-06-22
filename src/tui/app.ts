@@ -369,6 +369,14 @@ export class App {
         this.exit()
       } else if (this.isAgentBusy()) {
         this.agent.abort()
+        // Abort sub-agents too so they don't complete as ✓ after interrupt.
+        if (this.supervisor) {
+          for (const { task } of this.supervisor.listAgents()) {
+            if (task.status === 'running' || task.status === 'queued') {
+              void this.supervisor.stop(task.agentId).catch(() => {})
+            }
+          }
+        }
       } else {
         this.exit()
       }
@@ -655,8 +663,17 @@ export class App {
       `├─ ${dim('Status')}    ${task.status}${task.error ? ` — ${task.error}` : ''}`,
       `├─ ${dim('Role')}      ${task.role}`,
       `├─ ${dim('Time')}      ${durationStr} · ${task.usage.tokens.toLocaleString()} tokens · ${task.usage.toolCalls} tools`,
-      dim('│'),
     ]
+
+    // Available tools
+    const toolNames = this.supervisor!.registry.get(agentId)?.getSnapshot().toolNames ?? []
+    if (toolNames.length > 0) {
+      lines.push(`├─ ${accent('Tools')} ${dim(`(${toolNames.length})`)} ${dim('─'.repeat(Math.max(0, 48 - 9)))}`)
+      for (const name of toolNames) {
+        lines.push(`${dim('│')}  ${name}`)
+      }
+    }
+    lines.push(dim('│'))
 
     // Prompt section
     const promptLines = task.prompt.split('\n')
@@ -2566,8 +2583,14 @@ export class App {
       !e.done ? accent('●') : e.error ? theme.fg('red', '✗') : theme.fg('green', '✓')
 
     const now = Date.now()
-    const fmtElapsed = (ms: number) =>
-      ms < 1000 ? `${ms}ms` : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m`
+    const fmtElapsed = (ms: number) => {
+      const totalSecs = ms / 1000
+      if (totalSecs < 1) return `${totalSecs.toFixed(3)}s`
+      if (totalSecs < 60) return `${Math.floor(totalSecs)}s`
+      const mins = Math.floor(totalSecs / 60)
+      const secs = Math.floor(totalSecs % 60)
+      return `${mins}m ${secs}s`
+    }
 
     if (this.coordinatorWorking) {
       const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
@@ -2595,9 +2618,10 @@ export class App {
       for (let j = 0; j < tools.length; j++) {
         const tool = tools[j]
         const lastTool = j === tools.length - 1
+        const statusStr = !tool.done && tool.status ? ` ${theme.fg('accent', tool.status)}` : ''
         const detail = tool.detail ? ` ${dim(tool.detail)}` : ''
         const elapsed = !tool.done && tool.startedAt ? ` ${dim(fmtElapsed(now - tool.startedAt))}` : ''
-        add(`${prefix}${lastTool ? '└─' : '├─'} ${toolIcon(tool)} ${tool.name}${detail}${elapsed}`)
+        add(`${prefix}${lastTool ? '└─' : '├─'} ${toolIcon(tool)} ${tool.name}${statusStr}${detail}${elapsed}`)
       }
       if (toolHistory.length > 4) {
         add(`${prefix}   ${dim(`…${toolHistory.length - 4} more`)}`)

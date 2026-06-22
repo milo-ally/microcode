@@ -60,7 +60,7 @@ export interface AgentRuntimeState {
   task: Readonly<AgentTask>
   identity: ReturnType<MicrocodeAgent['getIdentity']>
   activity?: string
-  toolHistory: readonly { name: string; done: boolean; error: boolean; detail?: string; startedAt?: number }[]
+  toolHistory: readonly { name: string; done: boolean; error: boolean; detail?: string; startedAt?: number; status?: string }[]
 }
 
 export type SwarmUIEvent =

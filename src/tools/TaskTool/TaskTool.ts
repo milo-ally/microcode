@@ -186,8 +186,15 @@ export function createTaskTool(
     async execute(
       _toolCallId: string,
       params: TaskToolInput,
+      _signal?: AbortSignal,
+      onUpdate?: (partial: AgentToolResult<TaskToolDetails>) => void,
     ): Promise<AgentToolResult<TaskToolDetails>> {
       const persistence = requirePersistence(getPersistence)
+
+      onUpdate?.({
+        content: [{ type: 'text', text: `Managing tasks: ${params.action}` }],
+        details: { action: params.action, list: { id: '', title: '', tasks: [] } },
+      })
 
       if (params.action === 'write') {
         const title = params.title?.trim() || 'Task list'

@@ -105,6 +105,8 @@ export function createFileReadTool(
     async execute(
       _toolCallId: string,
       params: FileReadToolInput,
+      _signal?: AbortSignal,
+      onUpdate?: (partial: AgentToolResult<FileReadToolDetails>) => void,
     ): Promise<AgentToolResult<FileReadToolDetails>> {
       const filePath = isAbsolute(params.file_path)
         ? params.file_path
@@ -147,6 +149,16 @@ export function createFileReadTool(
             `... (${totalLines - endIndex} more lines, ${totalLines} total. Use offset=${endIndex + 1} to continue)`
         }
       }
+
+      onUpdate?.({
+        content: [{ type: 'text', text: `Reading ${filePath}...` }],
+        details: {
+          path: filePath,
+          totalLines,
+          returnedLines: selectedLines.length,
+          truncated,
+        },
+      })
 
       const sections: string[] = []
       if (warning) sections.push(warning)

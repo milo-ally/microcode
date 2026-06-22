@@ -109,6 +109,100 @@ function basename(p: string): string {
   return s || p
 }
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n}B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
+  return `${(n / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function formatToolStatus(
+  toolName: string,
+  args: Record<string, unknown>,
+  details?: Record<string, unknown>,
+): string | undefined {
+  if (details) {
+    // Streaming updates from tool_execution_update
+    switch (toolName) {
+      case 'bash': {
+        const stdout = typeof details.stdout === 'string' ? details.stdout : ''
+        const stderr = typeof details.stderr === 'string' ? details.stderr : ''
+        const lines = (stdout + stderr).split('\n').filter(l => l.length > 0).length
+        return lines > 0 ? `${lines} lines` : undefined
+      }
+      case 'write': {
+        const bytes = typeof details.bytesWritten === 'number' ? details.bytesWritten : 0
+        return bytes > 0 ? formatBytes(bytes) : 'Writing...'
+      }
+      case 'edit': {
+        const adds = typeof details.additions === 'number' ? details.additions : 0
+        const rems = typeof details.removals === 'number' ? details.removals : 0
+        return `${adds}+ ${rems}-`
+      }
+      case 'read': {
+        const returned = typeof details.returnedLines === 'number' ? details.returnedLines : 0
+        const total = typeof details.totalLines === 'number' ? details.totalLines : 0
+        return total > 0 ? `${returned}/${total} lines` : `${returned} lines`
+      }
+      case 'grep': {
+        const matches = typeof details.numMatches === 'number' ? details.numMatches : 0
+        const files = typeof details.numFiles === 'number' ? details.numFiles : 0
+        return files > 0 ? `${matches} matches · ${files} files` : `${matches} matches`
+      }
+      case 'glob': {
+        const files = typeof details.numFiles === 'number' ? details.numFiles : 0
+        return `${files} files`
+      }
+      default:
+        return undefined
+    }
+  }
+
+  // Initial status from tool_execution_start (no streaming details yet)
+  switch (toolName) {
+    case 'bash':
+      return 'Running...'
+    case 'write':
+      return 'Writing...'
+    case 'edit':
+      return 'Editing...'
+    case 'read':
+      return 'Reading...'
+    case 'grep':
+      return 'Searching...'
+    case 'glob':
+      return 'Finding files...'
+    case 'vision':
+      return 'Analyzing image...'
+    case 'spawn': {
+      const desc = typeof args.description === 'string' ? args.description : ''
+      const preview = desc.length > 30 ? `${desc.slice(0, 30)}…` : desc
+      return preview || 'Launching...'
+    }
+    case 'task': {
+      const action = typeof args.action === 'string' ? args.action : ''
+      return action ? `Tasks · ${action}` : 'Tasks...'
+    }
+    case 'message':
+      return 'Sending...'
+    case 'stop':
+      return 'Stopping...'
+    case 'status':
+      return 'Checking...'
+    case 'skill': {
+      const skill = typeof args.name === 'string' ? args.name : ''
+      return skill ? `Loading: ${skill}` : 'Loading skill...'
+    }
+    default: {
+      // MCP tools: mcp__server__tool
+      if (toolName.startsWith('mcp__')) {
+        const parts = toolName.slice(5).split('__')
+        return parts.length === 2 ? `${parts[0]}/${parts[1]}` : toolName
+      }
+      return undefined
+    }
+  }
+}
+
 export interface AgentSupervisorOptions {
   coordinator: MicrocodeAgent
   maxWorkers?: number
@@ -133,7 +227,7 @@ export class AgentSupervisor {
   private readonly listeners = new Set<SwarmUIEventListener>()
   private readonly queue: string[] = []
   private readonly activities = new Map<string, string>()
-  private readonly toolHistory = new Map<string, { name: string; done: boolean; error: boolean; detail?: string; startedAt?: number }[]>()
+  private readonly toolHistory = new Map<string, { name: string; done: boolean; error: boolean; detail?: string; startedAt?: number; status?: string }[]>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly unsubscribers = new Map<string, () => void>()
   private readonly queuedPrompts = new Map<string, string>()
@@ -556,18 +650,43 @@ export class AgentSupervisor {
           usage: { toolCalls: task.usage.toolCalls + 1 },
         })
         const history = this.toolHistory.get(agentId) ?? []
-        history.push({ name: event.toolName, done: false, error: false })
-        if (history.length > 12) history.shift()
-        this.toolHistory.set(agentId, history)
+        // tool_execution_start may have already created the entry; avoid duplicates.
+        const exists = [...history].reverse().find(
+          (h) => h.name === event.toolName && !h.done,
+        )
+        if (!exists) {
+          history.push({ name: event.toolName, done: false, error: false })
+          if (history.length > 12) history.shift()
+          this.toolHistory.set(agentId, history)
+        }
       }
       if (event.type === 'tool_execution_start') {
         const history = this.toolHistory.get(agentId) ?? []
-        const entry = [...history].reverse().find(
+        let entry = [...history].reverse().find(
           (h) => h.name === event.toolName && !h.detail,
         )
+        if (!entry) {
+          entry = { name: event.toolName, done: false, error: false }
+          history.push(entry)
+        }
+        entry.detail = toolDetail(event.toolName, event.args as Record<string, unknown>)
+        entry.startedAt = Date.now()
+        entry.status = formatToolStatus(event.toolName, event.args as Record<string, unknown>) || entry.status
+        this.toolHistory.set(agentId, history)
+      }
+      if (event.type === 'tool_execution_update') {
+        const history = this.toolHistory.get(agentId) ?? []
+        const entry = [...history].reverse().find(
+          (h) => h.name === event.toolName && !h.done,
+        )
         if (entry) {
-          entry.detail = toolDetail(event.toolName, event.args as Record<string, unknown>)
-          entry.startedAt = Date.now()
+          const pr = event.partialResult as any
+          const status = formatToolStatus(
+            event.toolName,
+            event.args as Record<string, unknown>,
+            pr?.details,
+          )
+          if (status) entry.status = status
         }
       }
       if (event.type === 'tool_finished') {
@@ -580,10 +699,20 @@ export class AgentSupervisor {
           entry.error = event.isError
         }
       }
-      const activity = describeActivity(event)
-      if (activity) {
-        this.activities.set(worker.getId(), activity)
-        this.emit({ type: 'agent_activity', task: this.tasks.get(taskId)!, text: activity })
+      // Emit on every tool state change so the TUI re-renders the tool tree immediately.
+      if (
+        event.type === 'tool_started' ||
+        event.type === 'tool_execution_start' ||
+        event.type === 'tool_execution_update' ||
+        event.type === 'tool_finished'
+      ) {
+        const activity = describeActivity(event)
+        if (activity) this.activities.set(worker.getId(), activity)
+        this.emit({
+          type: 'agent_activity',
+          task: this.tasks.get(taskId)!,
+          text: activity || '',
+        })
       }
     })
     this.unsubscribers.set(worker.getId(), unsubscribe)
