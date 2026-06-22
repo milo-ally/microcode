@@ -33,6 +33,43 @@ canvas {
   100% { transform: scale(1); color: #ffffff; }
 }
 
+#dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  grid-template-rows: repeat(3, 48px);
+  gap: 4px;
+  margin-top: 16px;
+  justify-content: center;
+}
+
+.dpad-btn {
+  width: 48px;
+  height: 48px;
+  background: #222;
+  border: 2px solid #00ff88;
+  color: #fff;
+  font-size: 22px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  transition: background 0.1s ease;
+}
+
+.dpad-btn:active {
+  background: #00ff88;
+  color: #111;
+}
+
+.dpad-btn[data-direction="ArrowUp"]    { grid-column: 2; grid-row: 1; }
+.dpad-btn[data-direction="ArrowLeft"]  { grid-column: 1; grid-row: 2; }
+.dpad-btn[data-direction="ArrowDown"]  { grid-column: 2; grid-row: 3; }
+.dpad-btn[data-direction="ArrowRight"] { grid-column: 3; grid-row: 2; }
+
 #restartBtn {
   background: #00c853;
   color: #ffffff;
