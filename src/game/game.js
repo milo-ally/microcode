@@ -151,6 +151,7 @@ export default class SnakeGame {
 
   updateScore() {
     this.scoreDisplay.textContent = `Score: ${this.state.score}`;
+    this.scoreDisplay.dispatchEvent(new CustomEvent('scoreChanged'));
   }
 
   draw() {

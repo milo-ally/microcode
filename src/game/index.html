@@ -13,7 +13,15 @@
   <script type="module">
     import SnakeGame from './game.js';
     document.addEventListener('DOMContentLoaded', () => {
-      new SnakeGame('gameCanvas', 'scoreDisplay', 'restartBtn').start();
+      const game = new SnakeGame('gameCanvas', 'scoreDisplay', 'restartBtn');
+      const scoreDisplay = document.getElementById('scoreDisplay');
+      scoreDisplay.addEventListener('scoreChanged', () => {
+        scoreDisplay.classList.add('score-pop');
+        scoreDisplay.addEventListener('animationend', () => {
+          scoreDisplay.classList.remove('score-pop');
+        }, { once: true });
+      });
+      game.start();
     });
   </script>
 </body>
