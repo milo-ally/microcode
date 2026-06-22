@@ -58,6 +58,8 @@ export interface AgentPermissionConfig {
 export interface CreateMicrocodeAgentOptions {
   cwd?: string
   modelId?: string
+  /** Protocol format (e.g., "anthropic-messages", "openai-completions"). Must match the model ID. */
+  api?: Api
   thinkingLevel?: ThinkingLevel
   mcpServers?: McpServerState[]
   onCompactionProgress?: (progress: CompactionProgress) => void

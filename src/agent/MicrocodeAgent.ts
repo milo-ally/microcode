@@ -122,7 +122,7 @@ export class MicrocodeAgent {
     })
 
     const modelConfig = options.modelId
-      ? resolveAgentModelConfig(options.modelId)
+      ? resolveAgentModelConfig(options.modelId, options.api as Api | undefined)
       : getModelConfig()
     this.modelManager = new AgentModelManager({
       model: modelConfig.model,

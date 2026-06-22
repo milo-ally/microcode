@@ -56,6 +56,7 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
   const worker = createMicrocodeAgentRuntime({
     cwd,
     modelId: request.modelId ?? parentSnapshot.model.id,
+    api: parentSnapshot.model.api,
     thinkingLevel: parent.getThinkingLevel(),
     identity: {
       id: agentId,

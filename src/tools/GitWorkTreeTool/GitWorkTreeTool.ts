@@ -66,7 +66,6 @@ export function createGitWorkTreeTool(
         }
         const tasks = await supervisor.waitForBatch(input.batch_id, {
           signal,
-          timeoutMs: input.timeout ? input.timeout * 1000 : undefined,
           onProgress: (progress) => {
             onUpdate?.({
               content: [{
@@ -79,10 +78,38 @@ export function createGitWorkTreeTool(
             })
           },
         })
-        return textResult(
-          `Agent batch ${input.batch_id} completed. Results are ready and the automatic agent-results notification will follow.`,
-          { batchId: input.batch_id, tasks },
-        )
+
+        const parts: string[] = [`## Agent batch ${input.batch_id} complete`]
+        for (const task of tasks) {
+          const icon = task.status === 'completed' ? '✓' : task.status === 'failed' ? '✗' : '!'
+          parts.push(`\n### ${icon} ${task.description}  [${task.status}]`)
+          parts.push(`agent_id: \`${task.agentId}\``)
+
+          if (task.result) {
+            parts.push(`\n${task.result}`)
+          }
+          if (task.error) {
+            parts.push(`\nError: ${task.error}`)
+          }
+          parts.push(`\n<tokens: ${task.usage.tokens}  tools: ${task.usage.toolCalls}>`)
+
+          if (task.status === 'completed') {
+            try {
+              const wdiff = await supervisor.getWorktreeDiff(task.agentId)
+              if (wdiff.includes('untracked files:') && !wdiff.includes('(none)')) {
+                parts.push(`Worktree: has untracked files — merge will auto-stage them`)
+              } else if (wdiff.includes('no tracked changes, no untracked files')) {
+                parts.push(`Worktree: no output — check if worker wrote to wrong path`)
+              } else {
+                parts.push(`Worktree: changes detected`)
+              }
+            } catch {
+              // no worktree for this agent
+            }
+          }
+        }
+
+        return textResult(parts.join('\n'), { batchId: input.batch_id, tasks })
       }
 
       if (!input.agent_id) {
