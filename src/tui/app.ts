@@ -93,6 +93,7 @@ export class App {
   private chatContainer: Container
   private statusContainer: Container
   private editorContainer: Container
+  private workingContainer: Container
   private agent: MicrocodeAgent
   private editor!: MicrocodeEditor
   private footer: FooterComponent
@@ -141,6 +142,7 @@ export class App {
     this.chatContainer = new Container()
     this.statusContainer = new Container()
     this.editorContainer = new Container()
+    this.workingContainer = new Container()
     this.footer = new FooterComponent(
       agent,
       process.cwd(),
@@ -414,6 +416,7 @@ export class App {
     this.ui.addChild(this.chatContainer)
     this.ui.addChild(this.statusContainer)
     this.ui.addChild(this.editorContainer)
+    this.ui.addChild(this.workingContainer)
     this.ui.addChild(this.footer)
 
     this.ui.setFocus(this.editor)
@@ -2618,9 +2621,8 @@ export class App {
     const accent = (s: string) => theme.fg('accent', s)
     const active = new Set(['queued', 'running'])
 
-    // ── Coordinator "Working..." line — update in-place ──
+    // ── Coordinator "Working..." spinner — render in its own container ──
     if (this.coordinatorWorking) {
-      // Advance spinner frame smoothly — matches the 80ms tick rate
       this.agentTreeFrameIndex++
       const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
       const frame = frames[Math.floor(this.agentTreeFrameIndex / 2) % frames.length]
@@ -2629,12 +2631,10 @@ export class App {
         this.agentTreeWorkingText.setText(label)
       } else {
         this.agentTreeWorkingText = new Text(label, 1, 0)
-        this.statusContainer.addChild(this.agentTreeWorkingText)
-        this.agentTreeWidgets.push(this.agentTreeWorkingText)
+        this.workingContainer.addChild(this.agentTreeWorkingText)
       }
     } else if (this.agentTreeWorkingText) {
-      this.statusContainer.removeChild(this.agentTreeWorkingText)
-      this.agentTreeWidgets = this.agentTreeWidgets.filter((w) => w !== this.agentTreeWorkingText)
+      this.workingContainer.removeChild(this.agentTreeWorkingText)
       this.agentTreeWorkingText = null
       this.agentTreeFrameIndex = 0
     }
@@ -2700,10 +2700,7 @@ export class App {
     }
 
     // ── Diff update: reconcile generated lines with existing widgets ──
-    // Filter out the working-text spinner — it is managed separately.
-    const statusWidgets = this.agentTreeWidgets.filter(
-      (widget) => widget !== this.agentTreeWorkingText,
-    )
+    const statusWidgets = this.agentTreeWidgets
 
     // Add/update widgets for each line
     for (let i = 0; i < lines.length; i++) {
@@ -2958,7 +2955,7 @@ export class App {
       this.agentTreeTimer = null
     }
     if (this.agentTreeWorkingText) {
-      this.statusContainer.removeChild(this.agentTreeWorkingText)
+      this.workingContainer.removeChild(this.agentTreeWorkingText)
       this.agentTreeWorkingText = null
     }
     this.ui.stop()
