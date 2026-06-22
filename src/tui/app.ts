@@ -50,6 +50,7 @@ import type { Skill } from '../skill/skill.ts'
 import { type PermissionMode, PERMISSION_MODES } from '../permissions/index.ts'
 import type { TaskList } from '../tasks/TaskSystem.ts'
 import { MultiSelectList, type MultiSelectItem } from './components/multiSelectList.ts'
+import { AgentResult } from './components/agentResult.ts'
 
 import type { AgentSupervisor } from '../swarm/index.ts'
 
@@ -663,26 +664,6 @@ export class App {
     }
     if (promptLines.length > 20) lines.push(`${dim('│')}  …and ${promptLines.length - 20} more lines`)
 
-    // Result section
-    if (task.result) {
-      lines.push(dim('│'))
-      const resultLines = task.result.split('\n')
-      const isLast = !task.error
-      const branch = isLast ? '└─' : '├─'
-      lines.push(`${branch} ${accent('Result')} ${dim('─'.repeat(Math.max(0, 48 - 9)))}`)
-      for (const rl of resultLines.slice(0, 30)) {
-        lines.push(`${isLast ? ' ' : dim('│')}  ${rl}`)
-      }
-      if (resultLines.length > 30) lines.push(`${isLast ? ' ' : dim('│')}  …and ${resultLines.length - 30} more lines`)
-    }
-
-    // Error section
-    if (task.error) {
-      lines.push(dim('│'))
-      lines.push(`└─ ${accent('Error')} ${dim('─'.repeat(Math.max(0, 48 - 8)))}`)
-      lines.push(`   ${task.error}`)
-    }
-
     // Transcript — last 6 tool calls only
     const liveTranscript = this.supervisor.registry.get(agentId)?.getMessages()
     const transcript = (liveTranscript && liveTranscript.length > 0
@@ -691,18 +672,37 @@ export class App {
     const toolMessages = transcript
       .filter((m) => m.role === 'toolResult')
       .slice(-6)
+    const transcriptLines: string[] = []
     if (toolMessages.length > 0) {
-      lines.push('')
-      lines.push(accent(`Last ${toolMessages.length} tool calls`))
+      transcriptLines.push('')
+      transcriptLines.push(accent(`Last ${toolMessages.length} tool calls`))
       for (const m of toolMessages) {
         const name = m.toolName ?? 'unknown'
-        lines.push(`${dim('  ▸')} ${name}`)
+        transcriptLines.push(`${dim('  ▸')} ${name}`)
       }
     }
 
     for (const line of lines) {
       this.chatContainer.addChild(new Text(line, 1, 0))
     }
+
+    if (task.result) {
+      this.chatContainer.addChild(new Text(dim('│'), 1, 0))
+      this.chatContainer.addChild(new AgentResult(task.result, Boolean(task.error)))
+    }
+
+    if (task.error) {
+      this.chatContainer.addChild(new Text(dim('│'), 1, 0))
+      this.chatContainer.addChild(
+        new Text(`└─ ${accent('Error')} ${dim('─'.repeat(Math.max(0, 48 - 8)))}`, 1, 0),
+      )
+      this.chatContainer.addChild(new Text(`   ${task.error}`, 1, 0))
+    }
+
+    for (const line of transcriptLines) {
+      this.chatContainer.addChild(new Text(line, 1, 0))
+    }
+
     this.chatContainer.addChild(new Spacer(1))
     this.ui.requestRender()
   }
