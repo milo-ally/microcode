@@ -11,7 +11,6 @@ import {
   AgentSupervisor,
 } from './swarm/index.ts'
 import { SUPERVISOR_WORKER_PROMPT } from './prompt/prompts.ts'
-import { GitWorktreeSystem } from './git/GitWorktreeSystem.ts'
 import {
   createSpawnAgentTool,
   createSendAgentMessageTool,
@@ -20,6 +19,8 @@ import {
   STOP_AGENT_TOOL_NAME,
   createGetAgentStatusTool,
   GET_AGENT_STATUS_TOOL_NAME,
+  createDeleteAgentTool,
+  DELETE_AGENT_TOOL_NAME,
 } from './tools/index.ts'
 import { type PermissionMode, PERMISSION_MODES } from './permissions/index.ts'
 import { cleanupImageCache } from './utils/imageUtils.ts'
@@ -438,14 +439,9 @@ Session Management:
     agent.replaceMessages(restoredMessages, 'rebuild')
   }
 
-  // Git worktree system for isolated parallel agent execution.
-  const isGit = await GitWorktreeSystem.isGitRepo(process.cwd())
-  const worktreeSystem = isGit ? new GitWorktreeSystem(process.cwd()) : undefined
-
   const supervisor = new AgentSupervisor({
     coordinator: agent,
     persistence: sessionManager,
-    worktreeSystem,
     maxWorkers: positiveInt(process.env.MICROCODE_MAX_WORKERS, 4),
     timeoutMs: positiveInt(
       process.env.MICROCODE_AGENT_TIMEOUT_MS,
@@ -464,15 +460,13 @@ Session Management:
     createSendAgentMessageTool(supervisor, coordinatorId),
     createStopAgentTool(supervisor, coordinatorId),
     createGetAgentStatusTool(supervisor, coordinatorId),
+    createDeleteAgentTool(supervisor, coordinatorId),
   ]
-  if (worktreeSystem) {
-    const { createGitWorktreeTool } = await import('./tools/GitWorktreeTool/GitWorktreeTool.ts')
-    swarmTools.push(createGitWorktreeTool(() => worktreeSystem))
-  }
   agent.addTools(swarmTools)
   agent.addSessionPermission(SEND_AGENT_MESSAGE_TOOL_NAME)
   agent.addSessionPermission(STOP_AGENT_TOOL_NAME)
   agent.addSessionPermission(GET_AGENT_STATUS_TOOL_NAME)
+  agent.addSessionPermission(DELETE_AGENT_TOOL_NAME)
   await supervisor.restore()
 
   // Create TUI app (REPL starts immediately)

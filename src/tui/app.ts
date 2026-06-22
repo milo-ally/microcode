@@ -741,8 +741,48 @@ export class App {
       this.chatContainer.addChild(new Text(line, 1, 0))
     }
 
+    // Delete option
+    const deleteItems: SelectItem[] = [
+      { value: 'delete', label: 'Delete agent', description: 'Permanently remove this agent and all its traces' },
+      { value: 'back', label: 'Back', description: 'Return to agent list' },
+    ]
+    const deleteSelect = new SelectList(deleteItems, 2, {
+      selectedPrefix: (text) => chalk.cyan(text),
+      selectedText: (text) => chalk.cyan(text),
+      description: (text) => theme.dim(text),
+      scrollInfo: (text) => theme.dim(text),
+      noMatch: (text) => theme.dim(text),
+    })
     this.chatContainer.addChild(new Spacer(1))
+    this.chatContainer.addChild(deleteSelect)
+    this.ui.setFocus(deleteSelect)
     this.ui.requestRender()
+
+    let deleteFinished = false
+    const finishDelete = () => {
+      if (deleteFinished) return
+      deleteFinished = true
+      this.chatContainer.removeChild(deleteSelect)
+      this.chatContainer.addChild(new Spacer(1))
+      this.ui.setFocus(this.editor)
+      this.ui.requestRender()
+    }
+
+    deleteSelect.onSelect = (item) => {
+      if (item.value === 'delete') {
+        void this.supervisor!.delete(agentId).then(() => {
+          this.chatContainer.addChild(
+            new Text(theme.fg('accent', `Deleted agent ${agentId.slice(0, 8)} permanently.`), 1, 0),
+          )
+          this.chatContainer.addChild(new Spacer(1))
+          this.ui.requestRender()
+        }).catch((err: Error) => {
+          this.showError(`Failed to delete agent: ${err.message}`)
+        })
+      }
+      finishDelete()
+    }
+    deleteSelect.onCancel = finishDelete
   }
 
   private agentStatusIcon(status: string): string {

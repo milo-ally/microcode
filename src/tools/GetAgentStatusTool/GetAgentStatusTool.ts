@@ -7,7 +7,7 @@ export const TOOL_NAME = 'status'
 export const TOOL_DEFAULT_PERMISSION: PermissionBehavior = 'allow'
 
 const statusSchema = Type.Object({
-  agent_id: Type.Optional(Type.String()),
+  agent_id: Type.Optional(Type.String({ description: 'Specific agent ID. Omit to list ALL your delegated agents.' })),
 }, { additionalProperties: false })
 
 function textResult<T>(text: string, details: T): AgentToolResult<T> {
