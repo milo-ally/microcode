@@ -121,6 +121,10 @@ export class AgentTaskStore {
     return cloneTask(task)
   }
 
+  remove(taskId: string): boolean {
+    return this.tasks.delete(taskId)
+  }
+
   setStatus(taskId: string, status: AgentTaskStatus): Readonly<AgentTask> {
     const task = this.tasks.get(taskId)
     if (!task) throw new Error(`Agent task not found: ${taskId}`)

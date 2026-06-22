@@ -665,8 +665,11 @@ export class App {
         ? `${Math.floor(secs / 60)}m ${secs % 60}s`
         : `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
 
+    const detailContainer = new Container()
     const dim = theme.dim
     const accent = (s: string) => theme.fg('accent', s)
+
+    const addDetail = (text: string) => detailContainer.addChild(new Text(text, 1, 0))
 
     const lines: string[] = [
       accent(`${this.agentStatusIcon(task.status)} ${task.description}`),
@@ -713,35 +716,23 @@ export class App {
       }
     }
 
-    for (const line of lines) {
-      this.chatContainer.addChild(new Text(line, 1, 0))
-    }
+    for (const line of lines) addDetail(line)
 
     if (task.blockers.length > 0) {
-      this.chatContainer.addChild(new Text(dim('│'), 1, 0))
-      this.chatContainer.addChild(
-        new Text(`├─ ${accent('Blocked')} ${dim('─'.repeat(Math.max(0, 48 - 10)))}`, 1, 0),
-      )
-      for (const blocker of task.blockers) {
-        this.chatContainer.addChild(
-          new Text(`│  ${blocker.toolName}: ${blocker.reason}`, 1, 0),
-        )
-      }
+      addDetail(dim('│'))
+      addDetail(`├─ ${accent('Blocked')} ${dim('─'.repeat(Math.max(0, 48 - 10)))}`)
+      for (const blocker of task.blockers) addDetail(`│  ${blocker.toolName}: ${blocker.reason}`)
     }
 
     if (task.error) {
-      this.chatContainer.addChild(new Text(dim('│'), 1, 0))
-      this.chatContainer.addChild(
-        new Text(`└─ ${accent('Error')} ${dim('─'.repeat(Math.max(0, 48 - 8)))}`, 1, 0),
-      )
-      this.chatContainer.addChild(new Text(`   ${task.error}`, 1, 0))
+      addDetail(dim('│'))
+      addDetail(`└─ ${accent('Error')} ${dim('─'.repeat(Math.max(0, 48 - 8)))}`)
+      addDetail(`   ${task.error}`)
     }
 
-    for (const line of transcriptLines) {
-      this.chatContainer.addChild(new Text(line, 1, 0))
-    }
+    for (const line of transcriptLines) addDetail(line)
 
-    // Delete option
+    // Delete / Back
     const deleteItems: SelectItem[] = [
       { value: 'delete', label: 'Delete agent', description: 'Permanently remove this agent and all its traces' },
       { value: 'back', label: 'Back', description: 'Return to agent list' },
@@ -753,36 +744,41 @@ export class App {
       scrollInfo: (text) => theme.dim(text),
       noMatch: (text) => theme.dim(text),
     })
+    detailContainer.addChild(new Spacer(1))
+    detailContainer.addChild(deleteSelect)
+    this.chatContainer.addChild(detailContainer)
     this.chatContainer.addChild(new Spacer(1))
-    this.chatContainer.addChild(deleteSelect)
     this.ui.setFocus(deleteSelect)
     this.ui.requestRender()
 
     let deleteFinished = false
-    const finishDelete = () => {
+    const goBack = () => {
       if (deleteFinished) return
       deleteFinished = true
-      this.chatContainer.removeChild(deleteSelect)
-      this.chatContainer.addChild(new Spacer(1))
-      this.ui.setFocus(this.editor)
-      this.ui.requestRender()
+      this.chatContainer.removeChild(detailContainer)
+      this.handleAgentsCommand()
     }
 
     deleteSelect.onSelect = (item) => {
       if (item.value === 'delete') {
         void this.supervisor!.delete(agentId).then(() => {
+          this.chatContainer.removeChild(detailContainer)
           this.chatContainer.addChild(
-            new Text(theme.fg('accent', `Deleted agent ${agentId.slice(0, 8)} permanently.`), 1, 0),
+            new Text(theme.fg('accent', `✓ Deleted agent ${state.task.description} permanently.`), 1, 0),
           )
           this.chatContainer.addChild(new Spacer(1))
+          this.updateAgentTree()
+          this.ui.setFocus(this.editor)
           this.ui.requestRender()
         }).catch((err: Error) => {
+          this.chatContainer.removeChild(detailContainer)
           this.showError(`Failed to delete agent: ${err.message}`)
         })
+      } else {
+        goBack()
       }
-      finishDelete()
     }
-    deleteSelect.onCancel = finishDelete
+    deleteSelect.onCancel = goBack
   }
 
   private agentStatusIcon(status: string): string {

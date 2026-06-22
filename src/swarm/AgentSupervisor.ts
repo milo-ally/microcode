@@ -526,10 +526,27 @@ export class AgentSupervisor {
     this.unsubscribers.delete(agentId)
     this.registry.remove(agentId)
 
-    // Clear tracking maps.
+    // Emit final event before removal so TUI can update agent tree.
+    if (task.status !== 'cancelled') {
+      const updated = this.tasks.update(task.id, {
+        status: 'cancelled',
+        error: 'Deleted.',
+        completedAt: Date.now(),
+      })
+      this.emit({ type: 'agent_status_changed', task: updated })
+    }
+
+    // Clear tracking maps and remove task record.
     this.toolHistory.delete(agentId)
     this.activities.delete(agentId)
     this.timers.delete(task.id)
+    this.tasks.remove(task.id)
+
+    // Remove from batch so tryDeliverBatch won't reference the missing task.
+    const batch = this.batches.get(task.batchId)
+    if (batch) {
+      batch.taskIds = batch.taskIds.filter((id) => id !== task.id)
+    }
 
     this.drainQueue()
   }
