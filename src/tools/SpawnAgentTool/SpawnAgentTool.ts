@@ -11,6 +11,7 @@ const spawnSchema = Type.Object({
   prompt: Type.String({ description: 'Complete, self-contained worker instructions.' }),
   role: Type.Optional(Type.String({ description: 'Worker role, such as researcher or implementer.' })),
   tools: Type.Optional(Type.Array(Type.String(), {
+    
     description: 'Tool names to grant the worker. If omitted, defaults to read-only tools (read, grep, glob, vision, skill, search).',
   })),
 }, { additionalProperties: false })

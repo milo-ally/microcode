@@ -133,7 +133,7 @@ export class AgentSupervisor {
   private readonly listeners = new Set<SwarmUIEventListener>()
   private readonly queue: string[] = []
   private readonly activities = new Map<string, string>()
-  private readonly toolHistory = new Map<string, { name: string; done: boolean; error: boolean; detail?: string }[]>()
+  private readonly toolHistory = new Map<string, { name: string; done: boolean; error: boolean; detail?: string; startedAt?: number }[]>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly unsubscribers = new Map<string, () => void>()
   private readonly queuedPrompts = new Map<string, string>()
@@ -565,7 +565,10 @@ export class AgentSupervisor {
         const entry = [...history].reverse().find(
           (h) => h.name === event.toolName && !h.detail,
         )
-        if (entry) entry.detail = toolDetail(event.toolName, event.args as Record<string, unknown>)
+        if (entry) {
+          entry.detail = toolDetail(event.toolName, event.args as Record<string, unknown>)
+          entry.startedAt = Date.now()
+        }
       }
       if (event.type === 'tool_finished') {
         const history = this.toolHistory.get(agentId) ?? []

@@ -121,6 +121,7 @@ export class App {
   private titleGenerated = false
   private supervisor?: AgentSupervisor
   private agentTreeWidgets: Text[] = []
+  private agentTreeTimer: ReturnType<typeof setInterval> | null = null
   onExit?: () => void | Promise<void>
 
   constructor(
@@ -2570,6 +2571,10 @@ export class App {
     const toolIcon = (e: { done: boolean; error: boolean }) =>
       !e.done ? accent('●') : e.error ? theme.fg('red', '✗') : theme.fg('green', '✓')
 
+    const now = Date.now()
+    const fmtElapsed = (ms: number) =>
+      ms < 1000 ? `${ms}ms` : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m`
+
     add(dim('─ Agents ─'))
 
     const activeStates = states.filter((s) => active.has(s.task.status))
@@ -2577,12 +2582,13 @@ export class App {
       .filter((s) => !active.has(s.task.status))
       .sort((a, b) => (b.task.completedAt ?? 0) - (a.task.completedAt ?? 0))
 
-    // Active agents with tool tree
     for (let i = 0; i < activeStates.length; i++) {
-      const { task, toolHistory } = activeStates[i]
+      const { task, toolHistory, activity } = activeStates[i]
       const isLastActive = i === activeStates.length - 1 && terminalStates.length === 0
       const branch = isLastActive ? '└─' : '├─'
-      add(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}`)
+      const elapsed = task.startedAt ? now - task.startedAt : 0
+      const sub = task.status === 'queued' ? 'waiting' : activity || 'running'
+      add(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}  ${dim(fmtElapsed(elapsed))} · ${dim(sub)}`)
 
       const prefix = isLastActive ? '   ' : '│  '
       const tools = toolHistory.slice(-4)
@@ -2590,7 +2596,8 @@ export class App {
         const tool = tools[j]
         const lastTool = j === tools.length - 1
         const detail = tool.detail ? ` ${dim(tool.detail)}` : ''
-        add(`${prefix}${lastTool ? '└─' : '├─'} ${toolIcon(tool)} ${tool.name}${detail}`)
+        const elapsed = !tool.done && tool.startedAt ? ` ${dim(fmtElapsed(now - tool.startedAt))}` : ''
+        add(`${prefix}${lastTool ? '└─' : '├─'} ${toolIcon(tool)} ${tool.name}${detail}${elapsed}`)
       }
       if (toolHistory.length > 4) {
         add(`${prefix}   ${dim(`…${toolHistory.length - 4} more`)}`)
@@ -2599,13 +2606,23 @@ export class App {
 
     for (let i = 0; i < terminalStates.length; i++) {
       const { task, toolHistory } = terminalStates[i]
-      const last = i === terminalStates.length - 1 && activeStates.length === 0
-      const branch = last ? '└─' : '├─'
+      const isLast = i === terminalStates.length - 1 && activeStates.length === 0
+      const branch = isLast ? '└─' : '├─'
       const tools = toolHistory.slice(-1)
       const summary = tools.length > 0
         ? ` ${toolIcon(tools[0])} ${tools[0].name}${tools[0].detail ? ` ${dim(tools[0].detail)}` : ''}${toolHistory.length > 1 ? `  (${toolHistory.length})` : ''}`
         : ''
       add(dim(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}${summary}`))
+    }
+
+    if (activeStates.length > 0 && !this.agentTreeTimer) {
+      this.agentTreeTimer = setInterval(() => {
+        this.updateAgentTree()
+        this.ui.requestRender()
+      }, 1000)
+    } else if (activeStates.length === 0 && this.agentTreeTimer) {
+      clearInterval(this.agentTreeTimer)
+      this.agentTreeTimer = null
     }
   }
 
@@ -2827,6 +2844,10 @@ export class App {
     if (this.toolElapsedTimer) {
       clearInterval(this.toolElapsedTimer)
       this.toolElapsedTimer = undefined
+    }
+    if (this.agentTreeTimer) {
+      clearInterval(this.agentTreeTimer)
+      this.agentTreeTimer = null
     }
     this.ui.stop()
   }
