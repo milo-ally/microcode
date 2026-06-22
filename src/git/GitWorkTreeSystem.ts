@@ -262,7 +262,27 @@ export class GitWorkTreeSystem {
   }
 
   private async removeUnlocked(agentId: string, force: boolean): Promise<void> {
-    const worktree = this.require(agentId)
+    const worktree = this.worktrees.get(agentId)
+    if (!worktree) {
+      // Map entry missing — maybe the in-memory state was lost (session switch,
+      // crash recovery, etc.) but git state may still exist. Try to clean up.
+      const branch = `microcode/${agentId}`
+      const branches = await this.git(['branch', '--list', branch]).catch(() => '')
+      if (branches.trim()) {
+        await this.git(['branch', '-D', branch]).catch(() => undefined)
+      }
+      const worktrees = await this.git(['worktree', 'list', '--porcelain']).catch(() => '')
+      const worktreePath = worktrees
+        .split('\n')
+        .filter((line, i, lines) => line.startsWith('worktree ') && lines[i + 1]?.trim() === branch)
+        .map((line) => line.slice('worktree '.length))
+        .find(() => true)
+      if (worktreePath) {
+        await this.git(['worktree', 'remove', ...(force ? ['--force'] : []), worktreePath]).catch(() => undefined)
+      }
+      return
+    }
+
     const status = await this.status(agentId)
     const merged = await this.isAncestor(worktree.branch, 'HEAD')
     if (!force && (status.changes.length > 0 || !merged)) {
@@ -277,7 +297,14 @@ export class GitWorkTreeSystem {
 
   private require(agentId: string): GitWorkTree {
     const worktree = this.worktrees.get(agentId)
-    if (!worktree) throw new Error(`No worktree found for agent ${agentId}.`)
+    if (!worktree) {
+      throw new Error(
+        `No worktree record for agent ${agentId}. The in-memory state may have been lost ` +
+        `(e.g. after a session switch). The git branch microcode/${agentId} may still exist — ` +
+        `check \`git branch --list microcode/${agentId}\` and merge or delete it manually. ` +
+        `Use \`worktree remove\` with this agent_id to clean up orphaned git state.`,
+      )
+    }
     return worktree
   }
 

@@ -302,14 +302,13 @@ export class AgentSupervisor {
 
   async prepareSessionSwitch(): Promise<void> {
     this.sleepingAgentMetas = []
-    const active = this.tasks.list().filter((task) =>
-      task.status === 'queued' ||
-      task.status === 'running' ||
-      task.status === 'blocked'
-    )
-    for (const task of active) {
-      const agent = this.registry.get(task.agentId)
-      if (agent) {
+
+    // Save worktree references for ALL agents — not just active ones.
+    // Otherwise completed agents' worktrees are lost after restore, but git branches
+    // remain, causing "No worktree found" errors.
+    for (const task of this.tasks.list()) {
+      const worktree = this.worktreeSystem?.get(task.agentId)
+      if (worktree) {
         this.sleepingAgentMetas.push({
           agentId: task.agentId,
           taskId: task.id,
@@ -318,9 +317,23 @@ export class AgentSupervisor {
           prompt: task.prompt,
           role: task.role,
           parentAgentId: task.parentAgentId,
-          permissionMode: agent.getPermissionMode(),
-          worktree: this.worktreeSystem?.get(task.agentId),
+          permissionMode: undefined,
+          worktree,
         })
+      }
+    }
+
+    const active = this.tasks.list().filter((task) =>
+      task.status === 'queued' ||
+      task.status === 'running' ||
+      task.status === 'blocked'
+    )
+    for (const task of active) {
+      const agent = this.registry.get(task.agentId)
+      if (agent) {
+        // Update the sleeping meta with the live permission mode
+        const meta = this.sleepingAgentMetas.find((m) => m.agentId === task.agentId)
+        if (meta) meta.permissionMode = agent.getPermissionMode()
         agent.abort()
       }
       this.clearTimer(task.id)
