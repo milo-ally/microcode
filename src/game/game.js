@@ -161,6 +161,24 @@ export default class SnakeGame {
       ctx.fillRect(seg.x * CELL_SIZE + 1, seg.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
     });
 
+    // Eyes on head
+    const head = this.state.snake[0];
+    const hx = head.x * CELL_SIZE;
+    const hy = head.y * CELL_SIZE;
+    const dir = this.state.dir;
+    const eyeOffsets = {
+      RIGHT: [{ x: 13, y: 4 }, { x: 13, y: 12 }],
+      LEFT: [{ x: 3, y: 4 }, { x: 3, y: 12 }],
+      UP: [{ x: 4, y: 3 }, { x: 12, y: 3 }],
+      DOWN: [{ x: 4, y: 13 }, { x: 12, y: 13 }],
+    };
+    for (const offset of eyeOffsets[dir]) {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(hx + offset.x, hy + offset.y, 4, 4);
+      ctx.fillStyle = '#111';
+      ctx.fillRect(hx + offset.x + 1, hy + offset.y + 1, 2, 2);
+    }
+
     // Food
     if (this.state.food) {
       ctx.fillStyle = '#f44';
