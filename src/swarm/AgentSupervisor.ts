@@ -506,6 +506,38 @@ export class AgentSupervisor {
     this.drainQueue()
   }
 
+  /** Stop all running and queued agents at once without restarting any. */
+  async stopAll(): Promise<void> {
+    const targets = this.tasks.list().filter(
+      (task) => task.status === 'queued' || task.status === 'running',
+    )
+    // Clear queue first so drainQueue has nothing to start.
+    this.queue.length = 0
+    // Seal and mark delivered so finishTask won't feed results to coordinator.
+    const batchIds = new Set(targets.map((t) => t.batchId))
+    for (const batchId of batchIds) {
+      const batch = this.batches.get(batchId)
+      if (batch) {
+        batch.status = 'sealed'
+        batch.sealedAt = Date.now()
+        this.batches.set(batchId, { ...batch, status: 'delivered' })
+      }
+    }
+    for (const task of targets) {
+      this.registry.get(task.agentId)?.abort()
+      this.clearTimer(task.id)
+      this.tasks.update(task.id, {
+        status: 'cancelled',
+        error: 'Stopped by user.',
+        completedAt: Date.now(),
+      })
+    }
+    for (const task of targets) {
+      this.emit({ type: 'agent_status_changed', task: this.tasks.get(task.id)! })
+      await this.finishTask(task)
+    }
+  }
+
   async shutdown(): Promise<void> {
     if (this.shuttingDown) return
     this.shuttingDown = true

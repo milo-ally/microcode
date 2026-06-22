@@ -1,5 +1,5 @@
 import { createMicrocodeAgentRuntime, type MicrocodeAgent } from '../agent/index.ts'
-import { getWorkerPrompt } from './prompts.ts'
+import { getWorkerPrompt } from '../prompt/prompts.ts'
 import type { AgentFactoryContext } from './types.ts'
 
 import { TOOL_NAME as READ_TOOL_NAME } from '../tools/FileReadTool/FileReadTool.ts'
@@ -70,6 +70,7 @@ export function createWorkerAgent(context: AgentFactoryContext): MicrocodeAgent 
     systemPromptSuffix: getWorkerPrompt(
       request.parentAgentId,
       request.description,
+      allowed.filter((name) => !ALWAYS_DENIED.has(name)),
     ),
   })
 

@@ -9,8 +9,8 @@ import type { McpServerConfig } from './mcp/types.ts'
 import { SessionManager } from './session/SessionManager.ts'
 import {
   AgentSupervisor,
-  SUPERVISOR_WORKER_PROMPT,
 } from './swarm/index.ts'
+import { SUPERVISOR_WORKER_PROMPT } from './prompt/prompts.ts'
 import {
   createSpawnAgentTool,
   createSendAgentMessageTool,

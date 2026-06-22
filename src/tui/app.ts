@@ -51,7 +51,7 @@ import { TOOL_NAME as SPAWN_TOOL_NAME } from '../tools/SpawnAgentTool/SpawnAgent
 import { promptSpawnPermission } from '../tools/SpawnAgentTool/UI.tsx'
 import type { TaskList } from '../tasks/TaskSystem.ts'
 import { MultiSelectList, type MultiSelectItem } from './components/multiSelectList.ts'
-import { AgentResult } from './components/agentResult.ts'
+
 
 import type { AgentSupervisor } from '../swarm/index.ts'
 
@@ -356,27 +356,39 @@ export class App {
     }
 
     // App-level key handlers on the Editor (pi-coding-agent pattern)
+    const stopAllSubAgents = () => {
+      if (!this.supervisor) return
+      void this.supervisor.stopAll().catch(() => {})
+    }
+
     this.editor.onEscape = () => {
       const now = Date.now()
       if (now - this.lastSigintTime < 500) {
         this.exit()
+        return
       }
       this.lastSigintTime = now
-      this.editor.setText('')
+      if (this.isAgentBusy()) {
+        this.agent.abort()
+        stopAllSubAgents()
+      } else if (this.supervisor && this.supervisor.listAgents().some(
+        s => s.task.status === 'running' || s.task.status === 'queued'
+      )) {
+        stopAllSubAgents()
+      } else {
+        this.editor.setText('')
+      }
     }
     this.editor.onCtrlC = () => {
       if (this.permissionPromptActive) {
         this.exit()
       } else if (this.isAgentBusy()) {
         this.agent.abort()
-        // Abort sub-agents too so they don't complete as ✓ after interrupt.
-        if (this.supervisor) {
-          for (const { task } of this.supervisor.listAgents()) {
-            if (task.status === 'running' || task.status === 'queued') {
-              void this.supervisor.stop(task.agentId).catch(() => {})
-            }
-          }
-        }
+        stopAllSubAgents()
+      } else if (this.supervisor && this.supervisor.listAgents().some(
+        s => s.task.status === 'running' || s.task.status === 'queued'
+      )) {
+        stopAllSubAgents()
       } else {
         this.exit()
       }
@@ -703,11 +715,6 @@ export class App {
 
     for (const line of lines) {
       this.chatContainer.addChild(new Text(line, 1, 0))
-    }
-
-    if (task.result) {
-      this.chatContainer.addChild(new Text(dim('│'), 1, 0))
-      this.chatContainer.addChild(new AgentResult(task.result, Boolean(task.error)))
     }
 
     if (task.blockers.length > 0) {
