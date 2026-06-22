@@ -7,7 +7,6 @@ import {
   Container,
   Text,
   Spacer,
-  Loader,
   SelectList,
   type SelectItem,
   type Component,
@@ -104,7 +103,7 @@ export class App {
   private pendingToolStartedAt = new Map<string, number>()
   private streamingToolLastRenderAt = new Map<string, number>()
   private toolElapsedTimer?: ReturnType<typeof setInterval>
-  private loadingAnimation?: Loader
+  private coordinatorWorking = false
   private lastSigintTime = 0
   private mcpClient?: McpClientManager
   private sessionManager: SessionManager
@@ -2551,7 +2550,7 @@ export class App {
 
     if (!this.supervisor) return
     const states = this.supervisor.listAgents()
-    if (states.length === 0) return
+    if (states.length === 0 && !this.coordinatorWorking) return
 
     const dim = (s: string) => theme.dim(s)
     const accent = (s: string) => theme.fg('accent', s)
@@ -2569,6 +2568,12 @@ export class App {
     const now = Date.now()
     const fmtElapsed = (ms: number) =>
       ms < 1000 ? `${ms}ms` : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m`
+
+    if (this.coordinatorWorking) {
+      const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+      const frame = frames[Math.floor(now / 120) % frames.length]
+      add(`${theme.fg('accent', frame)} Working...`)
+    }
 
     add(dim('─ Agents ─'))
 
@@ -2610,12 +2615,12 @@ export class App {
       add(dim(`${branch} ${this.agentStatusIcon(task.status)} ${task.description}${summary}`))
     }
 
-    if (activeStates.length > 0 && !this.agentTreeTimer) {
+    if ((activeStates.length > 0 || this.coordinatorWorking) && !this.agentTreeTimer) {
       this.agentTreeTimer = setInterval(() => {
         this.updateAgentTree()
         this.ui.requestRender()
-      }, 1000)
-    } else if (activeStates.length === 0 && this.agentTreeTimer) {
+      }, 250)
+    } else if (activeStates.length === 0 && !this.coordinatorWorking && this.agentTreeTimer) {
       clearInterval(this.agentTreeTimer)
       this.agentTreeTimer = null
     }
@@ -2809,30 +2814,17 @@ export class App {
   }
 
   private showWorking(): void {
-    if (!this.loadingAnimation) {
-      this.loadingAnimation = new Loader(
-        this.ui,
-        (text: string) => chalk.hex('#00d7ff')(text),
-        (text: string) => chalk.hex('#666666')(text),
-        'Working...',
-      )
-      this.loadingAnimation.start()
-      this.statusContainer.clear()
-      this.agentTreeWidgets = []
-      this.statusContainer.addChild(this.loadingAnimation)
-      this.ui.requestRender()
-    }
+    if (this.coordinatorWorking) return
+    this.coordinatorWorking = true
+    this.updateAgentTree()
+    this.ui.requestRender()
   }
 
   private hideWorking(): void {
-    if (this.loadingAnimation) {
-      this.loadingAnimation.stop()
-      this.statusContainer.clear()
-      this.loadingAnimation = undefined
-      // Restore agent tree so worker status is visible between coordinator turns.
-      this.updateAgentTree()
-      this.ui.requestRender()
-    }
+    if (!this.coordinatorWorking) return
+    this.coordinatorWorking = false
+    this.updateAgentTree()
+    this.ui.requestRender()
   }
 
   stop(): void {
