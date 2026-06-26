@@ -2,7 +2,7 @@ import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core'
 import { Type, type Static } from 'typebox'
 import { isAbsolute, resolve } from 'path'
 import type { PermissionBehavior } from '../../permissions/types.ts'
-import { isImageFilePath, readImageToBase64, getMimeType } from '../../utils/imageUtils.ts'
+import { isImageFilePath, readImageToBase64 } from '../../utils/imageUtils.ts'
 
 export const TOOL_NAME = 'vision'
 export const TOOL_DEFAULT_PERMISSION: PermissionBehavior = 'allow'

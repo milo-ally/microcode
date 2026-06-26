@@ -1,7 +1,4 @@
-/** @jsx h */
-/** @jsxFrag Fragment */
-import { h, Fragment } from '../../tui/jsxFactory.ts'
-import { Box, Container, Text, type Component } from '@earendil-works/pi-tui'
+import { Box, Container, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
 import { formatCompletedStatus, formatRunningStatus, getProgressFrame } from '../../tui/toolPresentation.ts'
@@ -27,7 +24,7 @@ export class BashToolUI extends Container implements ToolUIComponent {
   private details?: BashDetails
   private contentBox: Box
 
-  constructor(toolCallId: string, args: any) {
+  constructor(_toolCallId: string, args: any) {
     super()
     this.args = args
     this.contentBox = new Box(1, 0, (text: string) => theme.bg('toolPendingBg', text))

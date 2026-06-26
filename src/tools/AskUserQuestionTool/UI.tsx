@@ -1,7 +1,4 @@
-/** @jsx h */
-/** @jsxFrag Fragment */
-import { h, Fragment } from '../../tui/jsxFactory.ts'
-import { Box, Container, Text, type Component } from '@earendil-works/pi-tui'
+import { Box, Container, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
 
@@ -19,13 +16,12 @@ interface AskUserQuestionDetails {
 
 export class AskUserQuestionToolUI extends Container implements ToolUIComponent {
   private args: any
-  private expanded = false
   private executionStarted = false
   private result?: ToolResult
   private details?: AskUserQuestionDetails
   private contentBox: Box
 
-  constructor(toolCallId: string, args: any) {
+  constructor(_toolCallId: string, args: any) {
     super()
     this.args = args
     this.contentBox = new Box(1, 0, (text: string) => theme.bg('toolPendingBg', text))
@@ -33,8 +29,7 @@ export class AskUserQuestionToolUI extends Container implements ToolUIComponent 
     this.rebuild()
   }
 
-  setExpanded(expanded: boolean): void {
-    this.expanded = expanded
+  setExpanded(_expanded: boolean): void {
     this.rebuild()
   }
 

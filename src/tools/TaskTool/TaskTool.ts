@@ -193,7 +193,16 @@ export function createTaskTool(
 
       onUpdate?.({
         content: [{ type: 'text', text: `Managing tasks: ${params.action}` }],
-        details: { action: params.action, list: { id: '', title: '', tasks: [] } },
+        details: {
+          action: params.action,
+          list: {
+            id: '',
+            title: '',
+            tasks: [],
+            createdAt: '',
+            updatedAt: '',
+          },
+        },
       })
 
       if (params.action === 'write') {

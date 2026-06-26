@@ -22,31 +22,6 @@ export interface SkillToolDetails {
   content: string
 }
 
-export function createSkillTool(): AgentTool<typeof skillSchema, SkillToolDetails> {
-  return {
-    name: 'skill',
-    label: 'Skill',
-    description: 'Execute a skill by name. Skills are specialized instructions for specific tasks.',
-    parameters: skillSchema,
-    async execute(
-      _toolCallId: string,
-      params: SkillToolInput,
-      _signal?: AbortSignal,
-    ): Promise<AgentToolResult<SkillToolDetails>> {
-      const { skill: skillName } = params
-
-      // Get skills from agent (need to access agent instance)
-      // Since we don't have direct access to agent in this context,
-      // we'll need to handle this differently. For now, we'll create
-      // a version that can work with a skills map passed during creation.
-
-      throw new Error(
-        'SkillTool needs access to agent instance. Use createSkillToolWithAgent() instead.',
-      )
-    },
-  }
-}
-
 export interface SkillToolOptions {
   getSkills: () => Skill[]
 }

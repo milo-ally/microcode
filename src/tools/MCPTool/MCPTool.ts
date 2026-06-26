@@ -2,7 +2,7 @@ import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core'
 import { Type, type TSchema } from 'typebox'
 import type { McpClientManager } from '../../mcp/client.ts'
 import type { McpToolInfo } from '../../mcp/types.ts'
-import { registerDynamicDeferredTool, type ToolDefinition } from '../registry.ts'
+import { registerDynamicDeferredTool } from '../registry.ts'
 
 function jsonSchemaToTypeBox(inputSchema: Record<string, any>): TSchema {
   if (inputSchema.properties) {

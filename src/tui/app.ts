@@ -30,8 +30,6 @@ import {
   stripImagePathsFromText,
   tryReadImageFromPath,
   storeImage,
-  unquotePath,
-  IMAGE_EXTENSION_REGEX,
   type CachedImage,
 } from '../utils/imageUtils.ts'
 import { existsSync } from 'fs'
@@ -42,7 +40,7 @@ import { TOOL_NAME as BASH_TOOL_NAME } from '../tools/BashTool/BashTool.ts'
 import { TOOL_NAME as READ_TOOL_NAME } from '../tools/FileReadTool/FileReadTool.ts'
 import { TOOL_NAME as WRITE_TOOL_NAME } from '../tools/FileWriteTool/FileWriteTool.ts'
 import { TOOL_NAME as EDIT_TOOL_NAME } from '../tools/FileEditTool/FileEditTool.ts'
-import { addMcpServer, removeMcpServer, type ConfigScope } from '../mcp/configWrite.ts'
+import { addMcpServer, removeMcpServer } from '../mcp/configWrite.ts'
 import { SessionManager } from '../session/SessionManager.ts'
 import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
 import type { Skill } from '../skill/skill.ts'
@@ -1491,10 +1489,6 @@ export class App {
           : state.status === 'failed' ? '✗'
           : state.status === 'disabled' ? '○'
           : '◌'
-        const statusColor = state.status === 'connected' ? 'green'
-          : state.status === 'failed' ? 'red'
-          : 'gray'
-
         const statusLine = `${statusIcon} ${theme.bold(state.name)} ${theme.dim(`(${state.status})`)}`
         this.chatContainer.addChild(new Text(statusLine, 1, 0))
 
@@ -1651,11 +1645,6 @@ export class App {
     }
   }
 
-  private rebuildFooter(): void {
-    this.footer.invalidate()
-    this.ui.requestRender()
-  }
-
   private rebuildSystemPrompt(mcpServers?: McpServerState[]): void {
     this.agent.updateMcpServers(mcpServers)
   }
@@ -1781,7 +1770,6 @@ export class App {
     const level = args.trim().toLowerCase() as ThinkingLevel
 
     if (!level) {
-      const current = this.agent.getThinkingLevel()
       const items: SelectItem[] = App.THINKING_LEVELS.map((l) => ({
         value: l,
         label: l,
@@ -1998,7 +1986,7 @@ export class App {
    * Returns the collected answers, or { block: true } if cancelled.
    */
   async promptAskUserQuestion(
-    toolName: string,
+    _toolName: string,
     input: Record<string, unknown>,
   ): Promise<{ answers?: Record<string, string>; block?: boolean }> {
     const questions = input.questions as Array<{

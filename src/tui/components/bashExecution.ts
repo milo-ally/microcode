@@ -1,28 +1,19 @@
 import { Container, Loader, Spacer, Text, type TUI } from '@earendil-works/pi-tui'
-import { execSync } from 'child_process'
-import chalk from 'chalk'
 import { theme } from '../theme.ts'
 
 /**
  * Component for displaying bash command execution with streaming output.
  */
 export class BashExecutionComponent extends Container {
-  private command: string
   private outputLines: string[] = []
-  private status: 'running' | 'complete' | 'cancelled' | 'error' = 'running'
-  private exitCode: number | undefined = undefined
   private loader: Loader
   private contentContainer: Container
-  private excludeFromContext: boolean
 
   constructor(command: string, ui: TUI, excludeFromContext = false) {
     super()
-    this.command = command
-    this.excludeFromContext = excludeFromContext
 
     // Use dim border for excluded-from-context commands (!! prefix)
     const colorKey = excludeFromContext ? 'dim' : 'accent'
-    const borderColor = (str: string) => theme.fg(colorKey, str)
 
     // Add spacer
     this.addChild(new Spacer(1))
@@ -63,14 +54,10 @@ export class BashExecutionComponent extends Container {
   }
 
   setComplete(exitCode: number | undefined, cancelled: boolean): void {
-    this.status = cancelled ? 'cancelled' : exitCode === 0 ? 'complete' : 'error'
-    this.exitCode = exitCode
-
     // Remove loader
     this.contentContainer.clear()
 
     // Add exit status
-    const colorKey = this.status === 'error' ? 'error' : this.status === 'cancelled' ? 'warning' : 'success'
     let statusText = ''
     if (cancelled) {
       statusText = theme.fg('warning', 'Cancelled')

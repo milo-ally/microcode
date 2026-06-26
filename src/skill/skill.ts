@@ -296,7 +296,7 @@ function parseFrontmatter<T>(content: string): { frontmatter: T; content: string
 
 function loadSkillFromFile(
   filePath: string,
-  source: string,
+  _source: string,
 ): { skill: Skill | null; diagnostics: string[] } {
   const diagnostics: string[] = []
 

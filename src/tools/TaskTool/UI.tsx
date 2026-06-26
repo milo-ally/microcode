@@ -1,6 +1,3 @@
-/** @jsx h */
-/** @jsxFrag Fragment */
-import { h, Fragment } from '../../tui/jsxFactory.ts'
 import { Box, Container, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'

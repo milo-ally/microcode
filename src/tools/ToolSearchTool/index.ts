@@ -1,5 +1,5 @@
 import { registerTool } from '../registry.ts'
-import { createToolSearchTool, TOOL_SEARCH_TOOL_NAME } from './ToolSearchTool.ts'
+import { TOOL_SEARCH_TOOL_NAME } from './ToolSearchTool.ts'
 
 // ToolSearchTool itself is never deferred — the model needs it to discover other tools.
 // The actual creation happens in agent.ts with proper callbacks; here we register a

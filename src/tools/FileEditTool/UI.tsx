@@ -1,7 +1,4 @@
-/** @jsx h */
-/** @jsxFrag Fragment */
-import { h, Fragment } from '../../tui/jsxFactory.ts'
-import { Box, Container, Text, type Component } from '@earendil-works/pi-tui'
+import { Box, Container, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../../tui/theme.ts'
 import {
@@ -24,14 +21,13 @@ interface FileEditDetails {
 
 export class FileEditToolUI extends Container {
   private args: any
-  private expanded = false
   private executionStarted = false
   private elapsedMs = 0
   private result?: ToolResult
   private details?: FileEditDetails
   private contentBox: Box
 
-  constructor(toolCallId: string, args: any) {
+  constructor(_toolCallId: string, args: any) {
     super()
     this.args = args
     this.contentBox = new Box(1, 1, (text: string) => theme.bg('toolPendingBg', text))
@@ -39,8 +35,7 @@ export class FileEditToolUI extends Container {
     this.rebuild()
   }
 
-  setExpanded(expanded: boolean): void {
-    this.expanded = expanded
+  setExpanded(_expanded: boolean): void {
     this.rebuild()
   }
 

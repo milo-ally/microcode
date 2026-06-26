@@ -1,4 +1,4 @@
-import { Box, type Component, Container, Spacer, Text } from '@earendil-works/pi-tui'
+import { Box, Container, Spacer, Text } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
 import { theme } from '../theme.ts'
 import {
@@ -17,7 +17,6 @@ interface ToolResult {
  */
 export class ToolExecutionComponent extends Container {
   private toolName: string
-  private toolCallId: string
   private args: any
   private expanded = false
   private executionStarted = false
@@ -25,10 +24,9 @@ export class ToolExecutionComponent extends Container {
   private result?: ToolResult
   private contentBox: Box
 
-  constructor(toolName: string, toolCallId: string, args: any) {
+  constructor(toolName: string, _toolCallId: string, args: any) {
     super()
     this.toolName = toolName
-    this.toolCallId = toolCallId
     this.args = args
 
     this.contentBox = new Box(1, 1, (text: string) => theme.bg('toolPendingBg', text))

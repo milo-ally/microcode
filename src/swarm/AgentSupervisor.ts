@@ -1,6 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
-import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
+import type { MicrocodeAgent } from '../agent/index.ts'
 import type {
   GitWorkTreeMergeResult,
   GitWorkTreeStatus,
