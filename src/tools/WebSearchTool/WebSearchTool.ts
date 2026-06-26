@@ -71,7 +71,15 @@ function normalizeResultUrl(rawUrl: string): string | undefined {
     if (redirected) return redirected
     return url.toString()
   } catch {
-    return undefined
+    // DuckDuckGo sometimes returns protocol-relative URLs like //duckduckgo.com/l/?uddg=...
+    try {
+      const url = new URL(`https:${decoded}`)
+      const redirected = url.searchParams.get('uddg')
+      if (redirected) return redirected
+      return url.toString()
+    } catch {
+      return undefined
+    }
   }
 }
 
@@ -105,19 +113,28 @@ function parseDuckDuckGoHtml(
 ): WebSearchResult[] {
   const results: WebSearchResult[] = []
   const seen = new Set<string>()
-  const resultPattern = /<div[^>]*class="[^"]*result[^"]*"[\s\S]*?<\/div>\s*<\/div>/gi
+  const resultOpenTags = [...html.matchAll(/<div[^>]*class="[^"]*result results_links[^"]*"[^>]*>/gi)]
 
-  for (const match of html.matchAll(resultPattern)) {
-    const block = match[0]
-    const linkMatch = block.match(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i)
+  for (let i = 0; i < resultOpenTags.length; i++) {
+    const startIdx = resultOpenTags[i]!.index
+    const endIdx =
+      i + 1 < resultOpenTags.length
+        ? resultOpenTags[i + 1]!.index
+        : html.indexOf('<div class="nav"', startIdx)
+    const block = html.slice(startIdx, endIdx >= startIdx ? endIdx : startIdx + 3000)
+
+    const linkMatch = block.match(
+      /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i,
+    )
     if (!linkMatch) continue
 
     const url = normalizeResultUrl(linkMatch[1]!)
     if (!url || seen.has(url)) continue
     if (!isResultAllowed(url, allowedDomains, blockedDomains)) continue
 
-    const snippetMatch = block.match(/<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i)
-      ?? block.match(/<div[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/div>/i)
+    const snippetMatch = block.match(
+      /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i,
+    )
 
     seen.add(url)
     results.push({
