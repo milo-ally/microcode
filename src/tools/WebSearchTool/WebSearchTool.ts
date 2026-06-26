@@ -149,7 +149,7 @@ function formatResults(query: string, results: readonly WebSearchResult[]): stri
 export function createWebSearchTool(): AgentTool<typeof webSearchSchema, WebSearchToolDetails> {
   return {
     name: TOOL_NAME,
-    label: 'Web Search',
+    label: 'WebSearch',
     description:
       'Search the web for current information. Supports optional allowed_domains and blocked_domains filters. Include relevant result URLs as sources in the final response.',
     parameters: webSearchSchema,

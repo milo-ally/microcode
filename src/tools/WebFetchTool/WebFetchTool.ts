@@ -106,7 +106,7 @@ function buildOutput(
 export function createWebFetchTool(): AgentTool<typeof webFetchSchema, WebFetchToolDetails> {
   return {
     name: TOOL_NAME,
-    label: 'Web Fetch',
+    label: 'WebFetch',
     description:
       'Fetch a URL and return readable page content for analysis. Use for public web pages; authenticated or private URLs may fail.',
     parameters: webFetchSchema,
