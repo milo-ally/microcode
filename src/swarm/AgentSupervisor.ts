@@ -72,6 +72,14 @@ function describeActivity(event: MicrocodeAgentEvent): string | undefined {
         : 'Searching the codebase'
     case 'glob':
       return 'Finding files'
+    case 'WebSearch':
+      return typeof args.query === 'string'
+        ? `Searching ${args.query}`
+        : 'Searching the web'
+    case 'WebFetch':
+      return typeof args.url === 'string'
+        ? `Fetching ${shortUrl(args.url)}`
+        : 'Fetching a web page'
     case 'bash':
       return 'Running a command'
     default:
@@ -105,8 +113,27 @@ function toolDetail(toolName: string, args: Record<string, unknown>): string {
     }
     case 'glob':
       return typeof args.pattern === 'string' ? args.pattern : 'glob'
+    case 'WebSearch': {
+      const query = typeof args.query === 'string' ? args.query : ''
+      const preview = query.length > 42 ? `${query.slice(0, 42)}…` : query
+      return preview || 'web search'
+    }
+    case 'WebFetch': {
+      const url = typeof args.url === 'string' ? args.url : ''
+      return url ? shortUrl(url) : 'web fetch'
+    }
     default:
       return ''
+  }
+}
+
+function shortUrl(value: string): string {
+  try {
+    const url = new URL(value)
+    const display = `${url.hostname}${url.pathname === '/' ? '' : url.pathname}`
+    return display.length > 42 ? `…${display.slice(-41)}` : display
+  } catch {
+    return value.length > 42 ? `…${value.slice(-41)}` : value
   }
 }
 
@@ -158,6 +185,18 @@ function formatToolStatus(
         const files = typeof details.numFiles === 'number' ? details.numFiles : 0
         return `${files} files`
       }
+      case 'WebSearch': {
+        const results = Array.isArray(details.results) ? details.results.length : undefined
+        return results !== undefined && results > 0
+          ? `${results} results`
+          : undefined
+      }
+      case 'WebFetch': {
+        const bytes = typeof details.bytes === 'number' ? details.bytes : 0
+        const code = typeof details.code === 'number' && details.code > 0 ? String(details.code) : undefined
+        const size = bytes > 0 ? formatBytes(bytes) : undefined
+        return [code, size].filter(Boolean).join(' · ') || undefined
+      }
       default:
         return undefined
     }
@@ -177,6 +216,10 @@ function formatToolStatus(
       return 'Searching...'
     case 'glob':
       return 'Finding files...'
+    case 'WebSearch':
+      return 'Searching...'
+    case 'WebFetch':
+      return 'Fetching...'
     case 'vision':
       return 'Analyzing image...'
     case 'spawn': {
