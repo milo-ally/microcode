@@ -1,6 +1,7 @@
 import { registerTool } from '../registry.ts'
 import { createWebFetchTool, TOOL_DEFAULT_PERMISSION, TOOL_NAME } from './WebFetchTool.ts'
 import { WebFetchToolUI } from './UI.tsx'
+import { formatBytes, shortUrl } from '../../utils/displayUtils.ts'
 
 registerTool({
   name: TOOL_NAME,
@@ -10,6 +11,21 @@ registerTool({
   description:
     'Fetch a public URL and return readable page content for analysis. Authenticated or private URLs may fail.',
   shouldDefer: false,
+  display: {
+    activity: ({ input }) =>
+      typeof input.url === 'string'
+        ? `Fetching ${shortUrl(input.url)}`
+        : 'Fetching a web page',
+    detail: ({ input }) =>
+      typeof input.url === 'string' ? shortUrl(input.url) : 'web fetch',
+    status: ({ details }) => {
+      if (!details) return 'Fetching...'
+      const bytes = typeof details.bytes === 'number' ? details.bytes : 0
+      const code = typeof details.code === 'number' && details.code > 0 ? String(details.code) : undefined
+      const size = bytes > 0 ? formatBytes(bytes) : undefined
+      return [code, size].filter(Boolean).join(' · ') || undefined
+    },
+  },
   formatDescription: (input) =>
     typeof input.url === 'string' ? `web fetch ${input.url}` : 'web fetch',
   extractMatchContent: (input) =>

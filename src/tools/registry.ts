@@ -29,6 +29,20 @@ export interface ToolCreationContext {
   getPersistence?: () => AgentSessionPersistence | undefined
 }
 
+export interface ToolDisplayContext {
+  input: Record<string, unknown>
+  details?: Record<string, unknown>
+}
+
+export interface ToolDisplayFormatters {
+  /** Short active-turn text shown next to an agent, e.g. "Reading src/app.ts". */
+  activity?: (context: ToolDisplayContext) => string | undefined
+  /** Compact argument text shown after a tool name in the agent tree. */
+  detail?: (context: ToolDisplayContext) => string | undefined
+  /** Compact progress/result text shown while a tool is running. */
+  status?: (context: ToolDisplayContext) => string | undefined
+}
+
 /** 工具定义 — 绑定工具的所有元数据 */
 export interface ToolDefinition {
   name: string
@@ -41,6 +55,8 @@ export interface ToolDefinition {
   description?: string
   /** Precomputed JSON parameter schema used by ToolSearchTool. */
   schema?: string
+  /** TUI summaries used by swarm/agent status views. */
+  display?: ToolDisplayFormatters
   /** If true, tool is hidden from initial context and discovered via ToolSearchTool. */
   shouldDefer?: boolean
 }
@@ -65,6 +81,40 @@ export function getAllToolDefinitions(): ToolDefinition[] {
 
 export function getToolUIConstructor(name: string): ToolUIConstructor | undefined {
   return registry.get(name)?.ui
+}
+
+function formatMcpToolName(name: string): string | undefined {
+  if (!name.startsWith('mcp__')) return undefined
+  const parts = name.slice(5).split('__')
+  return parts.length === 2 ? `${parts[0]}/${parts[1]}` : name
+}
+
+export function formatToolActivity(
+  name: string,
+  input: Record<string, unknown>,
+): string {
+  const formatted = registry.get(name)?.display?.activity?.({ input })
+  if (formatted) return formatted
+  return `Using ${formatMcpToolName(name) ?? name}`
+}
+
+export function formatToolDetail(
+  name: string,
+  input: Record<string, unknown>,
+): string {
+  const def = registry.get(name)
+  const formatted = def?.display?.detail?.({ input })
+  if (formatted) return formatted
+  return formatMcpToolName(name) ?? ''
+}
+
+export function formatToolStatus(
+  name: string,
+  input: Record<string, unknown>,
+  details?: Record<string, unknown>,
+): string | undefined {
+  return registry.get(name)?.display?.status?.({ input, details })
+    ?? (details ? undefined : formatMcpToolName(name))
 }
 
 export function getToolDefaultPermissions(): Record<string, PermissionBehavior> {

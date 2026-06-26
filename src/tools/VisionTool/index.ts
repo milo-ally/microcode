@@ -9,6 +9,10 @@ registerTool({
   description:
     'Load an image from a URL or local file path into the conversation. Use for fetching images the user references by URL or disk path. Do NOT use for [Image: ...] placeholders — those images are already attached and visible.',
   ui: VisionToolUI,
+  display: {
+    activity: () => 'Analyzing image',
+    status: () => 'Analyzing image...',
+  },
   formatDescription: (input) => {
     const src =
       typeof input.image_source === 'string' ? input.image_source : '(unknown source)'

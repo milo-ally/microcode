@@ -98,6 +98,10 @@ export function createCodingTools(options: CreateCodingToolsOptions): AgentTool<
       name: SKILL_TOOL_NAME,
       defaultPermission: skillDefault,
       createTool: () => createSkillToolWithAgent({ getSkills }),
+      display: {
+        status: ({ input }) =>
+          typeof input.skill === 'string' ? `Loading: ${input.skill}` : 'Loading skill...',
+      },
       formatDescription: (input) =>
         typeof input.skill === 'string' ? `skill ${input.skill}` : '(unknown skill)',
       extractMatchContent: (input) =>

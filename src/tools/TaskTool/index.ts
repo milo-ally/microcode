@@ -9,6 +9,12 @@ registerTool({
   ui: TaskToolUI,
   description: 'Create, claim, and mark session-scoped task lists.',
   shouldDefer: false,
+  display: {
+    status: ({ input }) => {
+      const action = typeof input.action === 'string' ? input.action : ''
+      return action ? `Tasks · ${action}` : 'Tasks...'
+    },
+  },
   formatDescription: (input) => {
     const action = typeof input.action === 'string' ? input.action : 'manage'
     return `${action} task list`

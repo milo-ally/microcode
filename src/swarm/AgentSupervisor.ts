@@ -10,6 +10,11 @@ import { AgentRegistry } from './AgentRegistry.ts'
 import { AgentTaskStore } from './AgentTaskStore.ts'
 import { createWorkerAgent } from './AgentFactory.ts'
 import type { PermissionMode as _PermissionMode } from '../permissions/index.ts'
+import {
+  formatToolActivity,
+  formatToolDetail,
+  formatToolStatus,
+} from '../tools/registry.ts'
 import type {
   AgentBatch,
   AgentMeta,
@@ -49,207 +54,6 @@ function extractWorkerResult(messages: readonly AgentMessage[]): string {
   }
 
   return parts.join('\n').trim()
-}
-
-function describeActivity(event: MicrocodeAgentEvent): string | undefined {
-  if (event.type !== 'tool_execution_start') return undefined
-  const args = event.args as Record<string, unknown>
-  const path = typeof args.path === 'string'
-    ? args.path
-    : typeof args.file_path === 'string'
-      ? args.file_path
-      : undefined
-  switch (event.toolName) {
-    case 'read':
-      return path ? `Reading ${path}` : 'Reading a file'
-    case 'edit':
-      return path ? `Editing ${path}` : 'Editing a file'
-    case 'write':
-      return path ? `Writing ${path}` : 'Writing a file'
-    case 'grep':
-      return typeof args.pattern === 'string'
-        ? `Searching for ${args.pattern}`
-        : 'Searching the codebase'
-    case 'glob':
-      return 'Finding files'
-    case 'WebSearch':
-      return typeof args.query === 'string'
-        ? `Searching ${args.query}`
-        : 'Searching the web'
-    case 'WebFetch':
-      return typeof args.url === 'string'
-        ? `Fetching ${shortUrl(args.url)}`
-        : 'Fetching a web page'
-    case 'bash':
-      return 'Running a command'
-    default:
-      return `Using ${event.toolName}`
-  }
-}
-
-function toolDetail(toolName: string, args: Record<string, unknown>): string {
-  switch (toolName) {
-    case 'bash': {
-      const cmd = typeof args.command === 'string' ? args.command : ''
-      const preview = cmd.length > 40 ? `${cmd.slice(0, 40)}…` : cmd
-      return preview || 'bash'
-    }
-    case 'read': {
-      const p = typeof args.file_path === 'string' ? args.file_path : ''
-      return basename(p) || 'file'
-    }
-    case 'edit': {
-      const p = typeof args.file_path === 'string' ? args.file_path : ''
-      return basename(p) || 'edit'
-    }
-    case 'write': {
-      const p = typeof args.file_path === 'string' ? args.file_path : ''
-      return basename(p) || 'write'
-    }
-    case 'grep': {
-      const pattern = typeof args.pattern === 'string' ? args.pattern : ''
-      const preview = pattern.length > 30 ? `${pattern.slice(0, 30)}…` : pattern
-      return preview || 'grep'
-    }
-    case 'glob':
-      return typeof args.pattern === 'string' ? args.pattern : 'glob'
-    case 'WebSearch': {
-      const query = typeof args.query === 'string' ? args.query : ''
-      const preview = query.length > 42 ? `${query.slice(0, 42)}…` : query
-      return preview || 'web search'
-    }
-    case 'WebFetch': {
-      const url = typeof args.url === 'string' ? args.url : ''
-      return url ? shortUrl(url) : 'web fetch'
-    }
-    default:
-      return ''
-  }
-}
-
-function shortUrl(value: string): string {
-  try {
-    const url = new URL(value)
-    const display = `${url.hostname}${url.pathname === '/' ? '' : url.pathname}`
-    return display.length > 42 ? `…${display.slice(-41)}` : display
-  } catch {
-    return value.length > 42 ? `…${value.slice(-41)}` : value
-  }
-}
-
-function basename(p: string): string {
-  const s = p.split('/').pop() ?? p
-  return s || p
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n}B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
-  return `${(n / (1024 * 1024)).toFixed(1)}MB`
-}
-
-function formatToolStatus(
-  toolName: string,
-  args: Record<string, unknown>,
-  details?: Record<string, unknown>,
-): string | undefined {
-  if (details) {
-    // Streaming updates from tool_execution_update
-    switch (toolName) {
-      case 'bash': {
-        const stdout = typeof details.stdout === 'string' ? details.stdout : ''
-        const stderr = typeof details.stderr === 'string' ? details.stderr : ''
-        const lines = (stdout + stderr).split('\n').filter(l => l.length > 0).length
-        return lines > 0 ? `${lines} lines` : undefined
-      }
-      case 'write': {
-        const bytes = typeof details.bytesWritten === 'number' ? details.bytesWritten : 0
-        return bytes > 0 ? formatBytes(bytes) : 'Writing...'
-      }
-      case 'edit': {
-        const adds = typeof details.additions === 'number' ? details.additions : 0
-        const rems = typeof details.removals === 'number' ? details.removals : 0
-        return `${adds}+ ${rems}-`
-      }
-      case 'read': {
-        const returned = typeof details.returnedLines === 'number' ? details.returnedLines : 0
-        const total = typeof details.totalLines === 'number' ? details.totalLines : 0
-        return total > 0 ? `${returned}/${total} lines` : `${returned} lines`
-      }
-      case 'grep': {
-        const matches = typeof details.numMatches === 'number' ? details.numMatches : 0
-        const files = typeof details.numFiles === 'number' ? details.numFiles : 0
-        return files > 0 ? `${matches} matches · ${files} files` : `${matches} matches`
-      }
-      case 'glob': {
-        const files = typeof details.numFiles === 'number' ? details.numFiles : 0
-        return `${files} files`
-      }
-      case 'WebSearch': {
-        const results = Array.isArray(details.results) ? details.results.length : undefined
-        return results !== undefined && results > 0
-          ? `${results} results`
-          : undefined
-      }
-      case 'WebFetch': {
-        const bytes = typeof details.bytes === 'number' ? details.bytes : 0
-        const code = typeof details.code === 'number' && details.code > 0 ? String(details.code) : undefined
-        const size = bytes > 0 ? formatBytes(bytes) : undefined
-        return [code, size].filter(Boolean).join(' · ') || undefined
-      }
-      default:
-        return undefined
-    }
-  }
-
-  // Initial status from tool_execution_start (no streaming details yet)
-  switch (toolName) {
-    case 'bash':
-      return 'Running...'
-    case 'write':
-      return 'Writing...'
-    case 'edit':
-      return 'Editing...'
-    case 'read':
-      return 'Reading...'
-    case 'grep':
-      return 'Searching...'
-    case 'glob':
-      return 'Finding files...'
-    case 'WebSearch':
-      return 'Searching...'
-    case 'WebFetch':
-      return 'Fetching...'
-    case 'vision':
-      return 'Analyzing image...'
-    case 'spawn': {
-      const desc = typeof args.description === 'string' ? args.description : ''
-      const preview = desc.length > 30 ? `${desc.slice(0, 30)}…` : desc
-      return preview || 'Launching...'
-    }
-    case 'task': {
-      const action = typeof args.action === 'string' ? args.action : ''
-      return action ? `Tasks · ${action}` : 'Tasks...'
-    }
-    case 'message':
-      return 'Sending...'
-    case 'stop':
-      return 'Stopping...'
-    case 'status':
-      return 'Checking...'
-    case 'skill': {
-      const skill = typeof args.name === 'string' ? args.name : ''
-      return skill ? `Loading: ${skill}` : 'Loading skill...'
-    }
-    default: {
-      // MCP tools: mcp__server__tool
-      if (toolName.startsWith('mcp__')) {
-        const parts = toolName.slice(5).split('__')
-        return parts.length === 2 ? `${parts[0]}/${parts[1]}` : toolName
-      }
-      return undefined
-    }
-  }
 }
 
 export interface AgentSupervisorOptions {
@@ -948,7 +752,7 @@ export class AgentSupervisor {
           entry = { name: event.toolName, done: false, error: false }
           history.push(entry)
         }
-        entry.detail = toolDetail(event.toolName, event.args as Record<string, unknown>)
+        entry.detail = formatToolDetail(event.toolName, event.args as Record<string, unknown>)
         entry.startedAt = Date.now()
         entry.status = formatToolStatus(event.toolName, event.args as Record<string, unknown>) || entry.status
         this.toolHistory.set(agentId, history)
@@ -985,7 +789,9 @@ export class AgentSupervisor {
         event.type === 'tool_execution_update' ||
         event.type === 'tool_finished'
       ) {
-        const activity = describeActivity(event)
+        const activity = event.type === 'tool_execution_start'
+          ? formatToolActivity(event.toolName, event.args as Record<string, unknown>)
+          : undefined
         if (activity) this.activities.set(worker.getId(), activity)
         this.emit({
           type: 'agent_activity',

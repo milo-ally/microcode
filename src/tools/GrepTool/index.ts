@@ -1,12 +1,27 @@
 import { registerTool } from '../registry.ts'
 import { createGrepTool, TOOL_NAME, TOOL_DEFAULT_PERMISSION } from './GrepTool.ts'
 import { GrepToolUI } from './UI.tsx'
+import { preview } from '../../utils/displayUtils.ts'
 
 registerTool({
   name: TOOL_NAME,
   defaultPermission: TOOL_DEFAULT_PERMISSION,
   createTool: createGrepTool,
   ui: GrepToolUI,
+  display: {
+    activity: ({ input }) =>
+      typeof input.pattern === 'string'
+        ? `Searching for ${input.pattern}`
+        : 'Searching the codebase',
+    detail: ({ input }) =>
+      typeof input.pattern === 'string' ? preview(input.pattern, 30) : 'grep',
+    status: ({ details }) => {
+      if (!details) return 'Searching...'
+      const matches = typeof details.numMatches === 'number' ? details.numMatches : 0
+      const files = typeof details.numFiles === 'number' ? details.numFiles : 0
+      return files > 0 ? `${matches} matches · ${files} files` : `${matches} matches`
+    },
+  },
   description:
     'Search file contents with regex using ripgrep. Supports full regex syntax, output modes (content/files_with_matches/count), file type filtering, context lines, and pagination (head_limit/offset). Use in preference to running grep/rg from Bash.',
   formatDescription: (input) => {

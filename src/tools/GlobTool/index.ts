@@ -7,6 +7,16 @@ registerTool({
   defaultPermission: TOOL_DEFAULT_PERMISSION,
   createTool: createGlobTool,
   ui: GlobToolUI,
+  display: {
+    activity: () => 'Finding files',
+    detail: ({ input }) =>
+      typeof input.pattern === 'string' ? input.pattern : 'glob',
+    status: ({ details }) => {
+      if (!details) return 'Finding files...'
+      const files = typeof details.numFiles === 'number' ? details.numFiles : 0
+      return `${files} files`
+    },
+  },
   description:
     'Find files by glob pattern using ripgrep. Returns matching file paths sorted by modification time. Supports standard glob patterns like "**/*.ts" or "src/**/*.spec.ts".',
   formatDescription: (input) =>
