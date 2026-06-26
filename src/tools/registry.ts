@@ -35,30 +35,22 @@ export interface ToolDisplayContext {
 }
 
 export interface ToolDisplayFormatters {
-  /** Short active-turn text shown next to an agent, e.g. "Reading src/app.ts". */
-  activity?: (context: ToolDisplayContext) => string | undefined
-  /** Compact argument text shown after a tool name in the agent tree. */
-  detail?: (context: ToolDisplayContext) => string | undefined
-  /** Compact progress/result text shown while a tool is running. */
-  status?: (context: ToolDisplayContext) => string | undefined
+  activity?: (context: ToolDisplayContext) => string | undefined // Short active-turn text shown next to an agent, e.g. "Reading src/app.ts".
+  detail?: (context: ToolDisplayContext) => string | undefined // Compact argument text shown after a tool name in the agent tree.
+  status?: (context: ToolDisplayContext) => string | undefined // Compact progress/result text shown while a tool is running.
 }
 
-/** 工具定义 — 绑定工具的所有元数据 */
 export interface ToolDefinition {
   name: string
   defaultPermission: PermissionBehavior
   createTool: (cwd: string, context?: ToolCreationContext) => AgentTool<any, any>
   ui?: ToolUIConstructor
   formatDescription?: (input: Record<string, unknown>) => string
-  extractMatchContent?: (input: Record<string, unknown>) => string | undefined
-  /** Tool description for keyword search matching. Used by ToolSearchTool. */
-  description?: string
-  /** Precomputed JSON parameter schema used by ToolSearchTool. */
+  extractMatchContent?: (input: Record<string, unknown>) => string | undefined // Tool description for keyword search matching. Used by ToolSearchTool. 
+  description?: string  // Precomputed JSON parameter schema used by ToolSearchTool. 
   schema?: string
-  /** TUI summaries used by swarm/agent status views. */
-  display?: ToolDisplayFormatters
-  /** If true, tool is hidden from initial context and discovered via ToolSearchTool. */
-  shouldDefer?: boolean
+  display?: ToolDisplayFormatters // TUI summaries used by swarm/agent status views. 
+  shouldDefer?: boolean   // If true, tool is hidden from initial context and discovered via ToolSearchTool. 
 }
 
 // ============================================================================
