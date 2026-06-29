@@ -1,6 +1,7 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import type { PermissionBehavior } from '../permissions/types.ts'
 import { getAllToolDefinitions, getAllDeferredToolDefinitions, getCoreToolDefinitions, getToolDefaultPermissions, registerTool, type ToolCreationContext } from './registry.ts'
+import { joinSummaryParts, producedText, statusPrefix, text } from './summary.ts'
 import { createSkillToolWithAgent, TOOL_DEFAULT_PERMISSION as skillDefault, TOOL_NAME as SKILL_TOOL_NAME } from './SkillTool/SkillTool.ts'
 import { TOOL_SEARCH_TOOL_NAME } from './ToolSearchTool/ToolSearchTool.ts'
 import { TOOL_NAME as SPAWN_AGENT_TOOL_NAME } from './SpawnAgentTool/SpawnAgentTool.ts'
@@ -101,6 +102,14 @@ export function createCodingTools(options: CreateCodingToolsOptions): AgentTool<
       display: {
         status: ({ input }) =>
           typeof input.skill === 'string' ? `Loading: ${input.skill}` : 'Loading skill...',
+        summary: (context) => {
+          const details = context.details ?? {}
+          return `[skill] ${statusPrefix(context)}${joinSummaryParts([
+            text(details.skillName),
+            text(details.filePath),
+            producedText(context),
+          ])}`
+        },
       },
       formatDescription: (input) =>
         typeof input.skill === 'string' ? `skill ${input.skill}` : '(unknown skill)',

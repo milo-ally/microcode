@@ -20,6 +20,7 @@ export interface ToolUIComponent extends Component {
 export interface ToolResult {
   content: Array<{ type: string; text?: string }>
   isError: boolean
+  details?: Record<string, unknown>
 }
 
 /** UI 组件构造器 */
@@ -34,10 +35,21 @@ export interface ToolDisplayContext {
   details?: Record<string, unknown>
 }
 
+export interface ToolSummaryContext {
+  input?: Record<string, unknown>
+  details?: Record<string, unknown>
+  result: ToolResult
+  textStats: {
+    chars: number
+    lines: number
+  }
+}
+
 export interface ToolDisplayFormatters {
   activity?: (context: ToolDisplayContext) => string | undefined // Short active-turn text shown next to an agent, e.g. "Reading src/app.ts".
   detail?: (context: ToolDisplayContext) => string | undefined // Compact argument text shown after a tool name in the agent tree.
   status?: (context: ToolDisplayContext) => string | undefined // Compact progress/result text shown while a tool is running.
+  summary?: (context: ToolSummaryContext) => string | undefined // Model-facing summary for cross-agent result handoff. Must not include large raw output.
 }
 
 export interface ToolDefinition {
@@ -79,6 +91,39 @@ function formatMcpToolName(name: string): string | undefined {
   if (!name.startsWith('mcp__')) return undefined
   const parts = name.slice(5).split('__')
   return parts.length === 2 ? `${parts[0]}/${parts[1]}` : name
+}
+
+function countTextBlocks(result: ToolResult): { chars: number; lines: number } {
+  const text = result.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('\n')
+  return {
+    chars: text.length,
+    lines: text ? text.split('\n').length : 0,
+  }
+}
+
+export function formatToolSummary(
+  name: string,
+  result: ToolResult,
+  input?: Record<string, unknown>,
+): string {
+  const textStats = countTextBlocks(result)
+  const details = result.details
+  const context: ToolSummaryContext = {
+    input,
+    details,
+    result,
+    textStats,
+  }
+  const formatted = registry.get(name)?.display?.summary?.(context)
+  if (formatted) return formatted
+  const formattedName = formatMcpToolName(name) ?? name
+  const produced = `produced ${textStats.chars.toLocaleString()} chars` +
+    (textStats.lines > 0 ? ` across ${textStats.lines.toLocaleString()} lines` : '')
+  const status = result.isError ? 'failed' : 'completed'
+  return `[${formattedName}] ${status} · ${produced}`
 }
 
 export function formatToolActivity(

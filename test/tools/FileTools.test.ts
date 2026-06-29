@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm, truncate, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -70,6 +70,15 @@ describe('FileWriteTool', () => {
 })
 
 describe('FileReadTool', () => {
+  test('reports directories with an actionable error', async () => {
+    const root = await createRoot()
+    await mkdir(join(root, 'src'))
+
+    await expect(createFileReadTool(root).execute('read-dir', {
+      file_path: 'src',
+    })).rejects.toThrow('Cannot read directory')
+  })
+
   test('warns before content for files larger than 50 MB', async () => {
     const root = await createRoot()
     const filePath = join(root, 'large.txt')

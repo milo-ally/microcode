@@ -2,6 +2,7 @@ import { registerTool } from '../registry.ts'
 import { createFileEditTool, TOOL_NAME, TOOL_DEFAULT_PERMISSION } from './FileEditTool.ts'
 import { FileEditToolUI } from './UI.tsx'
 import { basename } from '../../utils/displayUtils.ts'
+import { count, joinSummaryParts, statusPrefix, text } from '../summary.ts'
 
 registerTool({
   name: TOOL_NAME,
@@ -20,6 +21,15 @@ registerTool({
       const additions = typeof details.additions === 'number' ? details.additions : 0
       const removals = typeof details.removals === 'number' ? details.removals : 0
       return `${additions}+ ${removals}-`
+    },
+    summary: (context) => {
+      const details = context.details ?? {}
+      return `[edit] ${statusPrefix(context)}${joinSummaryParts([
+        text(details.path),
+        count(details.replacements, 'replacements'),
+        count(details.additions, 'additions'),
+        count(details.removals, 'removals'),
+      ])}`
     },
   },
   formatDescription: (input) =>

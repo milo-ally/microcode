@@ -2,6 +2,7 @@ import { registerTool } from '../registry.ts'
 import { createWebFetchTool, TOOL_DEFAULT_PERMISSION, TOOL_NAME } from './WebFetchTool.ts'
 import { WebFetchToolUI } from './UI.tsx'
 import { formatBytes, shortUrl } from '../../utils/displayUtils.ts'
+import { boolTag, count, joinSummaryParts, statusPrefix, text } from '../summary.ts'
 
 registerTool({
   name: TOOL_NAME,
@@ -24,6 +25,19 @@ registerTool({
       const code = typeof details.code === 'number' && details.code > 0 ? String(details.code) : undefined
       const size = bytes > 0 ? formatBytes(bytes) : undefined
       return [code, size].filter(Boolean).join(' · ') || undefined
+    },
+    summary: (context) => {
+      const details = context.details ?? {}
+      const status = typeof details.code === 'number'
+        ? `HTTP ${details.code}${typeof details.codeText === 'string' && details.codeText ? ` ${details.codeText}` : ''}`
+        : undefined
+      return `[WebFetch] ${statusPrefix(context)}${joinSummaryParts([
+        text(details.finalUrl) ?? text(details.url),
+        status,
+        count(details.bytes, 'bytes'),
+        text(details.contentType),
+        boolTag(details.truncated, 'truncated'),
+      ])}`
     },
   },
   formatDescription: (input) =>

@@ -114,6 +114,11 @@ export function createFileReadTool(
 
       await access(filePath, constants.R_OK)
       const fileStat = await stat(filePath)
+      if (fileStat.isDirectory()) {
+        throw new Error(
+          `Cannot read directory: ${filePath}. Use glob to list files or read a specific file.`,
+        )
+      }
       await assertTextFile(filePath)
 
       const offset = Math.max(1, params.offset ?? 1)

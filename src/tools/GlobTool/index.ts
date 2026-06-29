@@ -1,6 +1,7 @@
 import { registerTool } from '../registry.ts'
 import { createGlobTool, TOOL_NAME, TOOL_DEFAULT_PERMISSION } from './GlobTool.ts'
 import { GlobToolUI } from './UI.tsx'
+import { boolTag, count, joinSummaryParts, previewList, statusPrefix } from '../summary.ts'
 
 registerTool({
   name: TOOL_NAME,
@@ -15,6 +16,16 @@ registerTool({
       if (!details) return 'Finding files...'
       const files = typeof details.numFiles === 'number' ? details.numFiles : 0
       return `${files} files`
+    },
+    summary: (context) => {
+      const details = context.details ?? {}
+      const duration = typeof details.durationMs === 'number' ? `${details.durationMs}ms` : undefined
+      return `[glob] ${statusPrefix(context)}${joinSummaryParts([
+        count(details.numFiles, 'files'),
+        boolTag(details.truncated, 'truncated'),
+        duration,
+        previewList(details.filenames, 8, 'files'),
+      ])}`
     },
   },
   description:

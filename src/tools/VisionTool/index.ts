@@ -1,6 +1,7 @@
 import { registerTool } from '../registry.ts'
 import { createVisionTool, TOOL_NAME, TOOL_DEFAULT_PERMISSION } from './VisionTool.ts'
 import { VisionToolUI } from './UI.tsx'
+import { joinSummaryParts, statusPrefix, text } from '../summary.ts'
 
 registerTool({
   name: TOOL_NAME,
@@ -12,6 +13,14 @@ registerTool({
   display: {
     activity: () => 'Analyzing image',
     status: () => 'Analyzing image...',
+    summary: (context) => {
+      const details = context.details ?? {}
+      return `[vision] ${statusPrefix(context)}${joinSummaryParts([
+        text(details.source),
+        text(details.sourceType),
+        text(details.mimeType),
+      ])}`
+    },
   },
   formatDescription: (input) => {
     const src =

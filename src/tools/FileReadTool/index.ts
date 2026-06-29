@@ -2,6 +2,7 @@ import { registerTool } from '../registry.ts'
 import { createFileReadTool, TOOL_NAME, TOOL_DEFAULT_PERMISSION } from './FileReadTool.ts'
 import { FileReadToolUI } from './UI.tsx'
 import { basename } from '../../utils/displayUtils.ts'
+import { boolTag, count, joinSummaryParts, statusPrefix, text } from '../summary.ts'
 
 registerTool({
   name: TOOL_NAME,
@@ -20,6 +21,15 @@ registerTool({
       const returned = typeof details.returnedLines === 'number' ? details.returnedLines : 0
       const total = typeof details.totalLines === 'number' ? details.totalLines : 0
       return total > 0 ? `${returned}/${total} lines` : `${returned} lines`
+    },
+    summary: (context) => {
+      const details = context.details ?? {}
+      return `[read] ${statusPrefix(context)}${joinSummaryParts([
+        text(details.path),
+        count(details.returnedLines, 'returned lines'),
+        count(details.totalLines, 'total lines'),
+        boolTag(details.truncated, 'truncated') ?? 'complete',
+      ])}`
     },
   },
   formatDescription: (input) =>

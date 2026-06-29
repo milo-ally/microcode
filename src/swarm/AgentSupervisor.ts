@@ -13,6 +13,7 @@ import type { PermissionMode as _PermissionMode } from '../permissions/index.ts'
 import {
   formatToolActivity,
   formatToolDetail,
+  formatToolSummary,
   formatToolStatus,
 } from '../tools/registry.ts'
 import type {
@@ -31,112 +32,6 @@ function createId(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
 }
 
-function textBlocksLength(message: ToolResultMessage): { chars: number; lines: number } {
-  const text = message.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n')
-  return {
-    chars: text.length,
-    lines: text ? text.split('\n').length : 0,
-  }
-}
-
-function formatCount(value: unknown, noun: string): string | undefined {
-  return typeof value === 'number' ? `${value.toLocaleString()} ${noun}` : undefined
-}
-
-function formatPath(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined
-}
-
-function summarizeToolResult(message: ToolResultMessage): string {
-  const details = (message.details ?? {}) as Record<string, any>
-  const { chars, lines } = textBlocksLength(message)
-  const produced = `produced ${chars.toLocaleString()} chars${lines > 0 ? ` across ${lines.toLocaleString()} lines` : ''}`
-  const errorPrefix = message.isError ? 'failed: ' : ''
-
-  switch (message.toolName) {
-    case 'read': {
-      const path = formatPath(details.path)
-      const returned = formatCount(details.returnedLines, 'returned lines')
-      const total = formatCount(details.totalLines, 'total lines')
-      const truncated = details.truncated ? 'truncated' : 'complete'
-      return `[read] ${errorPrefix}${[path, returned, total, truncated].filter(Boolean).join(' · ')}`
-    }
-    case 'write': {
-      const path = formatPath(details.path)
-      const bytes = formatCount(details.bytesWritten, 'bytes')
-      const additions = formatCount(details.additions, 'additions')
-      const removals = formatCount(details.removals, 'removals')
-      const state = details.written === false ? 'not written' : 'written'
-      const warning = typeof details.warning === 'string' ? `warning: ${details.warning}` : undefined
-      return `[write] ${errorPrefix}${[path, state, bytes, additions, removals, warning].filter(Boolean).join(' · ')}`
-    }
-    case 'edit': {
-      const path = formatPath(details.path)
-      const replacements = formatCount(details.replacements, 'replacements')
-      const additions = formatCount(details.additions, 'additions')
-      const removals = formatCount(details.removals, 'removals')
-      return `[edit] ${errorPrefix}${[path, replacements, additions, removals].filter(Boolean).join(' · ')}`
-    }
-    case 'grep': {
-      const files = formatCount(details.numFiles, 'files')
-      const matches = formatCount(details.numMatches, 'matches')
-      const linesFound = formatCount(details.numLines, 'lines')
-      const mode = typeof details.mode === 'string' ? `mode=${details.mode}` : undefined
-      const truncated = details.truncated ? 'truncated' : undefined
-      const examples = Array.isArray(details.filenames) && details.filenames.length > 0
-        ? `files: ${details.filenames.slice(0, 5).join(', ')}${details.filenames.length > 5 ? ', ...' : ''}`
-        : undefined
-      return `[grep] ${errorPrefix}${[mode, files, matches, linesFound, truncated, examples].filter(Boolean).join(' · ')}`
-    }
-    case 'glob': {
-      const files = formatCount(details.numFiles, 'files')
-      const truncated = details.truncated ? 'truncated' : undefined
-      const duration = typeof details.durationMs === 'number' ? `${details.durationMs}ms` : undefined
-      const examples = Array.isArray(details.filenames) && details.filenames.length > 0
-        ? `files: ${details.filenames.slice(0, 8).join(', ')}${details.filenames.length > 8 ? ', ...' : ''}`
-        : undefined
-      return `[glob] ${errorPrefix}${[files, truncated, duration, examples].filter(Boolean).join(' · ')}`
-    }
-    case 'bash': {
-      const exitCode = details.exitCode === null || typeof details.exitCode === 'number'
-        ? `exit=${details.exitCode}`
-        : undefined
-      return `[bash] ${errorPrefix}${[exitCode, produced].filter(Boolean).join(' · ')}`
-    }
-    case 'WebFetch': {
-      const url = formatPath(details.finalUrl) ?? formatPath(details.url)
-      const status = typeof details.code === 'number' ? `HTTP ${details.code}${details.codeText ? ` ${details.codeText}` : ''}` : undefined
-      const bytes = formatCount(details.bytes, 'bytes')
-      const type = typeof details.contentType === 'string' && details.contentType ? details.contentType : undefined
-      const truncated = details.truncated ? 'truncated' : undefined
-      return `[WebFetch] ${errorPrefix}${[url, status, bytes, type, truncated].filter(Boolean).join(' · ')}`
-    }
-    case 'WebSearch': {
-      const query = typeof details.query === 'string' ? `query="${details.query}"` : undefined
-      const count = Array.isArray(details.results) ? `${details.results.length} results` : undefined
-      const examples = Array.isArray(details.results) && details.results.length > 0
-        ? `top: ${details.results.slice(0, 3).map((item: any) => item.title || item.url).filter(Boolean).join('; ')}`
-        : undefined
-      return `[WebSearch] ${errorPrefix}${[query, count, examples].filter(Boolean).join(' · ')}`
-    }
-    case 'vision': {
-      const source = formatPath(details.source)
-      const type = typeof details.sourceType === 'string' ? details.sourceType : undefined
-      const mime = typeof details.mimeType === 'string' ? details.mimeType : undefined
-      return `[vision] ${errorPrefix}${[source, type, mime].filter(Boolean).join(' · ')}`
-    }
-    default: {
-      if (message.toolName.startsWith('mcp__')) {
-        return `[${message.toolName}] ${errorPrefix}MCP tool completed · ${produced}`
-      }
-      return `[${message.toolName}] ${errorPrefix}tool completed · ${produced}`
-    }
-  }
-}
-
 export function extractWorkerResult(messages: readonly AgentMessage[]): string {
   const parts: string[] = []
 
@@ -149,7 +44,12 @@ export function extractWorkerResult(messages: readonly AgentMessage[]): string {
         .trim()
       if (text) parts.push(text)
     } else if (message.role === 'toolResult') {
-      parts.push(summarizeToolResult(message as ToolResultMessage))
+      const toolResult = message as ToolResultMessage
+      parts.push(formatToolSummary(toolResult.toolName, {
+        content: toolResult.content,
+        details: toolResult.details,
+        isError: toolResult.isError,
+      }))
     }
   }
 
