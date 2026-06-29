@@ -1,7 +1,7 @@
 export { AgentRegistry } from './AgentRegistry.ts'
 export { AgentTaskStore } from './AgentTaskStore.ts'
 export { createWorkerAgent, getDefaultWorkerTools } from './AgentFactory.ts'
-export { AgentSupervisor } from './AgentSupervisor.ts'
+export { AgentSupervisor, extractWorkerResult } from './AgentSupervisor.ts'
 export type { AgentSupervisorOptions } from './AgentSupervisor.ts'
 
 export type {

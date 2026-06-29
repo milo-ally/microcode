@@ -4,6 +4,7 @@ import {
   createAssistantMessageEventStream,
   type AssistantMessage,
   type AssistantMessageEventStream,
+  type ToolResultMessage,
 } from '@earendil-works/pi-ai'
 import {
   createMicrocodeAgentRuntime,
@@ -15,6 +16,7 @@ import {
   type AgentBatch,
   type AgentTask,
   type AgentTranscriptPersistence,
+  extractWorkerResult,
 } from '../../src/swarm/index.ts'
 
 beforeAll(() => ensureBootstrapMacro())
@@ -122,6 +124,63 @@ class MemoryAgentPersistence implements AgentTranscriptPersistence {
     this.transcripts.set(agentId, [...messages])
   }
 }
+
+describe('worker result extraction', () => {
+  test('summarizes file reads instead of returning file contents to the coordinator', () => {
+    const longFileContent = Array.from({ length: 5000 }, (_, index) => `line ${index + 1}: novel text`).join('\n')
+    const toolResult: ToolResultMessage = {
+      role: 'toolResult',
+      toolCallId: 'read-call',
+      toolName: 'read',
+      content: [{ type: 'text', text: longFileContent }],
+      details: {
+        path: '/workspace/novel/chapter-01.md',
+        totalLines: 5000,
+        returnedLines: 2000,
+        truncated: true,
+      },
+      isError: false,
+      timestamp: Date.now(),
+    }
+
+    const result = extractWorkerResult([
+      toolResult as AgentMessage,
+      response('Drafted chapter and saved it to novel/chapter-01.md') as AgentMessage,
+    ])
+
+    expect(result).toContain('[read] /workspace/novel/chapter-01.md')
+    expect(result).toContain('2,000 returned lines')
+    expect(result).toContain('5,000 total lines')
+    expect(result).toContain('truncated')
+    expect(result).toContain('Drafted chapter and saved it to novel/chapter-01.md')
+    expect(result).not.toContain('line 4999: novel text')
+  })
+
+  test('summarizes large bash output without embedding stdout', () => {
+    const output = 'x'.repeat(120_000)
+    const toolResult: ToolResultMessage = {
+      role: 'toolResult',
+      toolCallId: 'bash-call',
+      toolName: 'bash',
+      content: [{ type: 'text', text: output }],
+      details: {
+        stdout: output,
+        stderr: '',
+        output,
+        exitCode: 0,
+      },
+      isError: false,
+      timestamp: Date.now(),
+    }
+
+    const result = extractWorkerResult([toolResult as AgentMessage])
+
+    expect(result).toContain('[bash] exit=0')
+    expect(result).toContain('produced 120,000 chars')
+    expect(result.length).toBeLessThan(200)
+    expect(result).not.toContain(output.slice(0, 1000))
+  })
+})
 
 describe('AgentSupervisor', () => {
   test('completes a worker, persists it, and notifies the coordinator once', async () => {
