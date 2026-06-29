@@ -14,6 +14,7 @@ import {
   type SlashCommand,
 } from '@earendil-works/pi-tui'
 import chalk from 'chalk'
+import type { ChildProcessWithoutNullStreams } from 'child_process'
 import { getAllModels, resolveApiKey } from '../models/index.ts'
 import { theme, getEditorTheme, getMarkdownTheme, getBashModeBorderColor } from './theme.ts'
 import { MicrocodeEditor } from './components/microcodeEditor.ts'
@@ -58,6 +59,9 @@ declare const MACRO: {
 }
 
 const APP_NAME = 'Microcode'
+const INTERACTIVE_SHELL_COMMANDS = new Set(['node', 'codex', 'claude', 'microcode'])
+const NON_INTERACTIVE_FLAGS = new Set(['--help', '-h', '--version', '-v'])
+const MICROCODE_NON_INTERACTIVE_SUBCOMMANDS = new Set(['mcp', 'model'])
 
 function countStreamingLines(content: string): number {
   if (!content) return 0
@@ -66,6 +70,66 @@ function countStreamingLines(content: string): number {
     if (content.charCodeAt(i) === 10) lines++
   }
   return content.endsWith('\n') ? lines - 1 : lines
+}
+
+function splitShellWords(command: string): string[] {
+  const words: string[] = []
+  let current = ''
+  let quote: '"' | "'" | undefined
+  let escaping = false
+
+  for (const ch of command.trim()) {
+    if (escaping) {
+      current += ch
+      escaping = false
+      continue
+    }
+    if (ch === '\\' && quote !== "'") {
+      escaping = true
+      continue
+    }
+    if ((ch === '"' || ch === "'") && !quote) {
+      quote = ch
+      continue
+    }
+    if (ch === quote) {
+      quote = undefined
+      continue
+    }
+    if (/\s/.test(ch) && !quote) {
+      if (current) {
+        words.push(current)
+        current = ''
+      }
+      continue
+    }
+    current += ch
+  }
+
+  if (current) words.push(current)
+  return words
+}
+
+function getShellConfig(): { shell: string; args: string[] } {
+  if (process.platform === 'win32') {
+    if (process.env.PSModulePath || process.env.SHELL?.includes('powershell')) {
+      return { shell: 'powershell.exe', args: ['-NoProfile', '-Command'] }
+    }
+    return { shell: 'cmd.exe', args: ['/c'] }
+  }
+  return { shell: '/bin/bash', args: ['-c'] }
+}
+
+export function isBareInteractiveCommand(command: string): boolean {
+  if (/[|&;<>()]/.test(command)) return false
+  const words = splitShellWords(command)
+  const first = words[0]?.split(/[\\/]/).at(-1)
+  if (!first || !INTERACTIVE_SHELL_COMMANDS.has(first)) return false
+  if (words.length === 1) return true
+  if (words.some((word) => NON_INTERACTIVE_FLAGS.has(word))) return false
+  if (first === 'node') return false
+  if (first === 'microcode' && MICROCODE_NON_INTERACTIVE_SUBCOMMANDS.has(words[1])) return false
+  return true
 }
 
 const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
@@ -112,6 +176,8 @@ export class App {
   private pendingEventsWhilePermission: Array<() => void> = []
   private isBashMode = false
   private bashComponent?: BashExecutionComponent
+  private activeBashProcess?: ChildProcessWithoutNullStreams
+  private bashCancelRequested = false
   private startupWarnings: string[] = []
   private pendingImages: CachedImage[] = []
   private imagePathProcessing = false
@@ -370,7 +436,9 @@ export class App {
         return
       }
       this.lastSigintTime = now
-      if (this.isAgentBusy()) {
+      if (this.activeBashProcess) {
+        this.cancelBashCommand()
+      } else if (this.isAgentBusy()) {
         this.agent.abort()
         stopAllSubAgents()
       } else if (this.supervisor && this.supervisor.listAgents().some(
@@ -384,6 +452,8 @@ export class App {
     this.editor.onCtrlC = () => {
       if (this.permissionPromptActive) {
         this.exit()
+      } else if (this.activeBashProcess) {
+        this.cancelBashCommand()
       } else if (this.isAgentBusy()) {
         this.agent.abort()
         stopAllSubAgents()
@@ -490,27 +560,112 @@ export class App {
     this.chatContainer.addChild(this.bashComponent)
     this.ui.requestRender()
 
+    if (isBareInteractiveCommand(command)) {
+      this.bashComponent.appendOutput(
+        'This command starts an interactive terminal session, which cannot run inside Microcode\'s inline shell.\n' +
+        'Run it in a separate terminal, or pass a non-interactive flag/subcommand such as --help, --version, or an explicit script.\n',
+      )
+      this.bashComponent.setComplete(undefined, true)
+      this.bashComponent = undefined
+      this.updateEditorBorderColor()
+      this.ui.requestRender()
+      return
+    }
+
     try {
-      const { exec } = await import('child_process')
-      exec(command, { cwd: process.cwd() }, (error, stdout, stderr) => {
-        const output = stdout + stderr
-        if (output) {
-          this.bashComponent?.appendOutput(output)
-        }
-        const exitCode = error ? error.code ?? 1 : 0
-        this.bashComponent?.setComplete(exitCode, false)
-        this.bashComponent = undefined
-        this.updateEditorBorderColor()
-        this.ui.requestRender()
+      const { spawn } = await import('child_process')
+      const { shell, args } = getShellConfig()
+      const component = this.bashComponent
+      this.bashCancelRequested = false
+
+      await new Promise<void>((resolve) => {
+        const child = spawn(shell, [...args, command], {
+          cwd: process.cwd(),
+          detached: process.platform !== 'win32',
+          stdio: 'pipe',
+          windowsHide: true,
+        })
+
+        this.activeBashProcess = child
+        child.stdin.end()
+
+        child.stdout.on('data', (data: Buffer) => {
+          component?.appendOutput(data.toString())
+          this.ui.requestRender()
+        })
+        child.stderr.on('data', (data: Buffer) => {
+          component?.appendOutput(data.toString())
+          this.ui.requestRender()
+        })
+
+        child.on('close', (code) => {
+          if (this.activeBashProcess === child) {
+            this.activeBashProcess = undefined
+          }
+          component?.setComplete(code ?? undefined, this.bashCancelRequested)
+          this.bashCancelRequested = false
+          if (this.bashComponent === component) {
+            this.bashComponent = undefined
+          }
+          this.updateEditorBorderColor()
+          this.ui.requestRender()
+          resolve()
+        })
+
+        child.on('error', (error) => {
+          if (this.activeBashProcess === child) {
+            this.activeBashProcess = undefined
+          }
+          component?.appendOutput(`Failed to start command: ${error.message}\n`)
+          component?.setComplete(undefined, false)
+          this.bashCancelRequested = false
+          if (this.bashComponent === component) {
+            this.bashComponent = undefined
+          }
+          this.updateEditorBorderColor()
+          this.ui.requestRender()
+          resolve()
+        })
       })
     } catch (error) {
       if (this.bashComponent) {
         this.bashComponent.setComplete(undefined, false)
       }
       this.showError(`Bash command failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      this.activeBashProcess = undefined
+      this.bashCancelRequested = false
       this.bashComponent = undefined
       this.updateEditorBorderColor()
     }
+  }
+
+  private cancelBashCommand(): void {
+    const child = this.activeBashProcess
+    if (!child) return
+
+    this.bashCancelRequested = true
+    try {
+      if (process.platform !== 'win32' && child.pid) {
+        process.kill(-child.pid, 'SIGTERM')
+      } else {
+        child.kill('SIGTERM')
+      }
+    } catch {
+      try {
+        child.kill('SIGTERM')
+      } catch {}
+    }
+
+    setTimeout(() => {
+      if (this.activeBashProcess !== child) return
+      try {
+        if (process.platform !== 'win32' && child.pid) {
+          process.kill(-child.pid, 'SIGKILL')
+        } else {
+          child.kill('SIGKILL')
+        }
+      } catch {}
+    }, 1000).unref()
   }
 
   private updateEditorBorderColor(): void {
@@ -2960,6 +3115,9 @@ export class App {
   }
 
   stop(): void {
+    if (this.activeBashProcess) {
+      this.cancelBashCommand()
+    }
     if (this.toolElapsedTimer) {
       clearInterval(this.toolElapsedTimer)
       this.toolElapsedTimer = undefined

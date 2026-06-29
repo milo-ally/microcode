@@ -5,9 +5,13 @@ import { theme } from '../theme.ts'
  * Component for displaying bash command execution with streaming output.
  */
 export class BashExecutionComponent extends Container {
+  private static readonly MAX_OUTPUT_LINES = 200
   private outputLines: string[] = []
   private loader: Loader
   private contentContainer: Container
+  private exitCode?: number
+  private cancelled = false
+  private completed = false
 
   constructor(command: string, ui: TUI, excludeFromContext = false) {
     super()
@@ -49,29 +53,37 @@ export class BashExecutionComponent extends Container {
     } else {
       this.outputLines.push(...newLines)
     }
+    if (this.outputLines.length > BashExecutionComponent.MAX_OUTPUT_LINES) {
+      this.outputLines = this.outputLines.slice(-BashExecutionComponent.MAX_OUTPUT_LINES)
+    }
 
     this.updateDisplay()
   }
 
   setComplete(exitCode: number | undefined, cancelled: boolean): void {
-    // Remove loader
-    this.contentContainer.clear()
-
-    // Add exit status
-    let statusText = ''
-    if (cancelled) {
-      statusText = theme.fg('warning', 'Cancelled')
-    } else if (exitCode === 0) {
-      statusText = theme.fg('success', `Exit code: ${exitCode}`)
-    } else {
-      statusText = theme.fg('error', `Exit code: ${exitCode}`)
-    }
-    this.contentContainer.addChild(new Text(statusText, 1, 0))
-
+    this.exitCode = exitCode
+    this.cancelled = cancelled
+    this.completed = true
     this.updateDisplay()
   }
 
   private updateDisplay(): void {
+    this.contentContainer.clear()
+
+    if (this.completed) {
+      let statusText = ''
+      if (this.cancelled) {
+        statusText = theme.fg('warning', 'Cancelled')
+      } else if (this.exitCode === 0) {
+        statusText = theme.fg('success', `Exit code: ${this.exitCode}`)
+      } else {
+        statusText = theme.fg('error', `Exit code: ${this.exitCode}`)
+      }
+      this.contentContainer.addChild(new Text(statusText, 1, 0))
+    } else {
+      this.contentContainer.addChild(this.loader)
+    }
+
     // Show output lines
     for (const line of this.outputLines) {
       if (line.trim()) {
