@@ -138,7 +138,7 @@ const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   { name: 'status', description: 'Show context usage, token statistics, and model details' },
   { name: 'model', description: 'Show or switch model (usage: /model [model-id])', argumentHint: '[model-id]' },
   { name: 'thinking', description: 'Show or set thinking depth (usage: /thinking [level])', argumentHint: '[off|minimal|low|medium|high|xhigh]' },
-  { name: 'mcp', description: 'Manage MCP servers (usage: /mcp [add|remove|enable|disable|reconnect] [args...])', argumentHint: '[action] [args...]' },
+  { name: 'mcp', description: 'Show MCP servers', argumentHint: '' },
   { name: 'session', description: 'Browse and load saved sessions', argumentHint: '' },
   { name: 'tasks', description: 'Browse tasks and prioritize unfinished work in the current session', argumentHint: '' },
   { name: 'agents', description: 'Browse delegated agents', argumentHint: '' },
@@ -1626,9 +1626,6 @@ export class App {
         this.chatContainer.addChild(
           new Text(theme.dim('No MCP servers configured.'), 1, 0),
         )
-        this.chatContainer.addChild(
-          new Text(theme.dim('Use /mcp add <name> <command> to add a server'), 1, 0),
-        )
         this.chatContainer.addChild(new Spacer(1))
         this.ui.requestRender()
         return
@@ -1668,10 +1665,6 @@ export class App {
         }
       }
 
-      this.chatContainer.addChild(new Spacer(1))
-      this.chatContainer.addChild(
-        new Text(theme.dim('Usage: /mcp [enable|disable|reconnect|add|remove] <server-name>'), 1, 0),
-      )
       this.chatContainer.addChild(new Spacer(1))
       this.ui.requestRender()
       return
@@ -1740,7 +1733,7 @@ export class App {
       return
     }
 
-    this.showError(`Unknown /mcp action: ${action}. Usage: /mcp [enable|disable|reconnect|add|remove] <server-name>`)
+    this.showError(`Unknown /mcp action: ${action}. Use /mcp to show servers.`)
   }
 
   private async handleMcpAddCommand(argsStr: string): Promise<void> {
@@ -2444,7 +2437,7 @@ export class App {
       `  ${theme.bold('/status')}             Show context usage, token statistics, and model details`,
       `  ${theme.bold('/model')} [model-id]   Show current model or switch to a different model`,
       `  ${theme.bold('/thinking')} [level]   Show or set thinking depth`,
-      `  ${theme.bold('/mcp')}                Manage MCP servers (add/remove/enable/disable)`,
+      `  ${theme.bold('/mcp')}                Show MCP servers`,
       `  ${theme.bold('/session')}            Browse and load saved sessions`,
       `  ${theme.bold('/tasks')}              Browse and prioritize tasks in the current session`,
       `  ${theme.bold('/new')}                Start a new conversation session`,
