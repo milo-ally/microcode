@@ -21,13 +21,13 @@ function tool(name: string, label: string): AgentTool<any, any> {
   }
 }
 
-function fakeMcpClient(toolName: string) {
+function fakeMcpClient(toolName: string, inputSchema: Record<string, any> = { type: 'object', properties: {} }) {
   return {
     getAllTools: () => [{
       name: toolName,
       serverName: 'test-server',
       description: 'Test MCP tool',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema,
     }],
     getAllResources: () => [],
     callTool: async () => ({ content: [{ type: 'text', text: 'ok' }] }),
@@ -104,6 +104,34 @@ describe('AgentToolManager', () => {
       'mcp__test-server__deferred_action',
     )
     expect(manager.commitPendingDiscoveredTools()).toEqual([])
+  })
+
+  test('returns MCP input schema through search without eagerly loading the tool', async () => {
+    const manager = new AgentToolManager({
+      cwd: process.cwd(),
+      getSkills: () => [],
+      model: resolveAgentModelConfig('deepseek-v4-pro', 'openai-completions').model,
+    })
+    manager.configureMcpTools(fakeMcpClient('evaluate_script', {
+      type: 'object',
+      required: ['function', 'filePath'],
+      properties: {
+        function: { type: 'string', description: 'JavaScript function to run' },
+        filePath: { type: 'string', description: 'Optional source file path' },
+        args: { type: 'array', description: 'Function arguments' },
+      },
+    }))
+    const search = manager.findTool('search')!
+
+    const result = await search.execute('search-call', {
+      query: 'select:mcp__test-server__evaluate_script',
+    })
+    const text = result.content[0]?.text ?? ''
+
+    expect(text).toContain('"required": [')
+    expect(text).toContain('"filePath"')
+    expect(text).toContain('"args"')
+    expect(manager.findTool('mcp__test-server__evaluate_script')).toBeUndefined()
   })
 
   test('keeps MCP deferred definitions scoped to one manager', async () => {

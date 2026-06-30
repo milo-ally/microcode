@@ -10,7 +10,7 @@ import { SessionManager } from './session/SessionManager.ts'
 import {
   AgentSupervisor,
 } from './swarm/index.ts'
-import { SUPERVISOR_WORKER_PROMPT } from './prompt/prompts.ts'
+import { SUPERVISOR_WORKER_PROMPT } from './swarm/prompts.ts'
 import {
   createSpawnAgentTool,
   createSendAgentMessageTool,

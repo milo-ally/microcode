@@ -4,34 +4,44 @@ import type { McpClientManager } from '../../mcp/client.ts'
 import type { McpToolInfo } from '../../mcp/types.ts'
 import { registerDynamicDeferredTool } from '../registry.ts'
 
+export function formatMcpInputSchema(inputSchema: Record<string, any>): string {
+  return JSON.stringify(inputSchema, null, 2)
+}
+
 function jsonSchemaToTypeBox(inputSchema: Record<string, any>): TSchema {
   if (inputSchema.properties) {
     const properties: Record<string, TSchema> = {}
+    const required = Array.isArray(inputSchema.required)
+      ? new Set(inputSchema.required.filter((key): key is string => typeof key === 'string'))
+      : new Set<string>()
+
     for (const [key, prop] of Object.entries(
       inputSchema.properties as Record<string, any>,
     )) {
+      let schema: TSchema
       switch (prop.type) {
         case 'string':
-          properties[key] = Type.String({ description: prop.description })
+          schema = Type.String({ description: prop.description })
           break
         case 'number':
         case 'integer':
-          properties[key] = Type.Number({ description: prop.description })
+          schema = Type.Number({ description: prop.description })
           break
         case 'boolean':
-          properties[key] = Type.Boolean({ description: prop.description })
+          schema = Type.Boolean({ description: prop.description })
           break
         case 'array':
-          properties[key] = Type.Array(Type.Any(), {
+          schema = Type.Array(Type.Any(), {
             description: prop.description,
           })
           break
         case 'object':
-          properties[key] = Type.Object({}, { description: prop.description })
+          schema = Type.Object({}, { description: prop.description })
           break
         default:
-          properties[key] = Type.Any({ description: prop.description })
+          schema = Type.Any({ description: prop.description })
       }
+      properties[key] = required.has(key) ? schema : Type.Optional(schema)
     }
 
     return Type.Object(properties, {
@@ -109,7 +119,7 @@ export function registerMcpToolsAsDeferred(clientManager: McpClientManager): voi
       defaultPermission: 'allow',
       createTool: () => createMcpTool(clientManager, toolInfo),
       description: `[MCP:${toolInfo.serverName}] ${toolInfo.description}`,
-      schema: JSON.stringify(jsonSchemaToTypeBox(toolInfo.inputSchema), null, 2),
+      schema: formatMcpInputSchema(toolInfo.inputSchema),
       shouldDefer: true,
     })
   }

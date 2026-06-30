@@ -29,7 +29,7 @@ export { createBashTool, TOOL_DEFAULT_PERMISSION as BASH_DEFAULT_PERMISSION } fr
 export { createFileReadTool, TOOL_DEFAULT_PERMISSION as FILE_READ_DEFAULT_PERMISSION } from './FileReadTool/FileReadTool.ts'
 export { createFileWriteTool, TOOL_DEFAULT_PERMISSION as FILE_WRITE_DEFAULT_PERMISSION } from './FileWriteTool/FileWriteTool.ts'
 export { createFileEditTool, TOOL_DEFAULT_PERMISSION as FILE_EDIT_DEFAULT_PERMISSION } from './FileEditTool/FileEditTool.ts'
-export { createMcpTool, createMcpTools, registerMcpToolsAsDeferred } from './MCPTool/MCPTool.ts'
+export { createMcpTool, createMcpTools, formatMcpInputSchema, registerMcpToolsAsDeferred } from './MCPTool/MCPTool.ts'
 export { createListMcpResourcesTool } from './ListMcpResourcesTool/ListMcpResourcesTool.ts'
 export { createReadMcpResourceTool } from './ReadMcpResourceTool/ReadMcpResourceTool.ts'
 export { createSkillToolWithAgent, TOOL_DEFAULT_PERMISSION as SKILL_DEFAULT_PERMISSION } from './SkillTool/SkillTool.ts'

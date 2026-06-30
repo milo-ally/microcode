@@ -5,6 +5,7 @@ import {
   createMcpTools,
   createListMcpResourcesTool,
   createReadMcpResourceTool,
+  formatMcpInputSchema,
 } from '../tools/index.ts'
 import {
   getDeferredToolDefinitions,
@@ -79,12 +80,20 @@ export class AgentToolManager {
   }
 
   configureMcpTools(client: McpClientManager): void {
+    const mcpTools = client.getAllTools()
+    const mcpToolSchemas = new Map(
+      mcpTools.map((tool) => [
+        `mcp__${tool.serverName}__${tool.name}`,
+        formatMcpInputSchema(tool.inputSchema),
+      ]),
+    )
     for (const tool of createMcpTools(client)) {
       this.deferredDefinitions.set(tool.name, {
         name: tool.name,
         defaultPermission: 'allow',
         shouldDefer: true,
         description: tool.description,
+        schema: mcpToolSchemas.get(tool.name),
         createTool: () => tool,
       })
     }
