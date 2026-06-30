@@ -1,0 +1,194 @@
+import { describe, expect, test } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { Type } from 'typebox'
+import { createAskUserQuestionTool } from '../../src/tools/AskUserQuestionTool/AskUserQuestionTool.ts'
+import { createDeleteAgentTool } from '../../src/tools/DeleteAgentTool/DeleteAgentTool.ts'
+import { createGetAgentStatusTool } from '../../src/tools/GetAgentStatusTool/GetAgentStatusTool.ts'
+import { createListMcpResourcesTool } from '../../src/tools/ListMcpResourcesTool/ListMcpResourcesTool.ts'
+import { createReadMcpResourceTool } from '../../src/tools/ReadMcpResourceTool/ReadMcpResourceTool.ts'
+import { createSendAgentMessageTool } from '../../src/tools/SendAgentMessageTool/SendAgentMessageTool.ts'
+import { createSkillToolWithAgent } from '../../src/tools/SkillTool/SkillTool.ts'
+import { createSpawnAgentTool } from '../../src/tools/SpawnAgentTool/SpawnAgentTool.ts'
+import { createStopAgentTool } from '../../src/tools/StopAgentTool/StopAgentTool.ts'
+import { createTaskTool } from '../../src/tools/TaskTool/TaskTool.ts'
+import { createToolSearchTool } from '../../src/tools/ToolSearchTool/ToolSearchTool.ts'
+
+function taskList(overrides: any = {}) {
+  return {
+    id: 'list-1',
+    title: 'Plan',
+    createdAt: 'now',
+    updatedAt: 'now',
+    tasks: [
+      { id: 'task-1', content: 'Read', completed: false, pending: false, createdAt: 'now', updatedAt: 'now' },
+    ],
+    stats: { total: 1, completed: 0, inProgress: 0, remaining: 1 },
+    ...overrides,
+  }
+}
+
+describe('control tools', () => {
+  test('Ask tool consumes pending answers before parameter fallback', async () => {
+    const tool = createAskUserQuestionTool('/tmp')
+    const questions = [{
+      question: 'Choose?',
+      header: 'Choice',
+      options: [
+        { label: 'A', description: 'a' },
+        { label: 'B', description: 'b' },
+      ],
+    }]
+    tool.setAnswers({ 'Choose?': 'A' })
+
+    const first = await tool.execute('ask', { questions, answers: { 'Choose?': 'B' } })
+    const second = await tool.execute('ask', { questions, answers: { 'Choose?': 'B' } })
+
+    expect(first.details?.answers).toEqual({ 'Choose?': 'A' })
+    expect(second.details?.answers).toEqual({ 'Choose?': 'B' })
+    expect(first.content[0]?.text).toContain('"Choose?" = "A"')
+  })
+
+  test('Task tool delegates write, claim, mark, and batch operations to persistence', async () => {
+    const calls: string[] = []
+    const persistence = {
+      createTaskList: async (title: string, tasks: string[]) => {
+        calls.push(`write:${title}:${tasks.join(',')}`)
+        return taskList()
+      },
+      claimTaskList: async (listId: string) => {
+        calls.push(`claim:${listId}`)
+        return taskList({ tasks: [] })
+      },
+      markTask: async (listId: string | undefined, taskId: string, completed: boolean, pending: boolean) => {
+        calls.push(`mark:${listId}:${taskId}:${completed}:${pending}`)
+        return taskList({ tasks: [{ ...taskList().tasks[0], completed, pending }] })
+      },
+      markTasks: async (input: any) => {
+        calls.push(`batch:${input.list_id}:${input.tasks.length}`)
+        return taskList()
+      },
+    }
+    const tool = createTaskTool('/tmp', { getPersistence: () => persistence as any })
+
+    expect((await tool.execute('task', { action: 'write', title: 'Plan', tasks: ['Read'] })).content[0]?.text).toContain('Task list')
+    await tool.execute('task', { action: 'claim', list_id: 'list-1' })
+    await tool.execute('task', { action: 'mark', list_id: 'list-1', task_id: 'task-1', status: 'pending' })
+    await tool.execute('task', { action: 'mark_batch', list_id: 'list-1', tasks: [{ task_id: 'task-1', checked: true }] as any })
+
+    expect(calls).toEqual([
+      'write:Plan:Read',
+      'claim:list-1',
+      'mark:list-1:task-1:false:true',
+      'batch:list-1:1',
+    ])
+    await expect(tool.execute('task', { action: 'write', tasks: [] as any })).rejects.toThrow('requires a non-empty tasks array')
+    await expect(tool.execute('task', { action: 'write', tasks: [{ task_id: 'task-1' }] as any })).rejects.toThrow('requires task content entries')
+    await expect(tool.execute('task', { action: 'mark', task_id: 'task-1' })).rejects.toThrow('requires status')
+    await expect(tool.execute('task', { action: 'mark_batch', tasks: ['bad'] as any })).rejects.toThrow('requires task update objects')
+    await expect(tool.execute('task', { action: 'mark_batch', tasks: [{ task_id: 'task-1' }] as any })).rejects.toThrow('requires status')
+
+    const unavailableBatch = createTaskTool('/tmp', { getPersistence: () => ({ ...persistence, markTasks: undefined }) as any })
+    await expect(unavailableBatch.execute('task', { action: 'mark_batch', tasks: [{ task_id: 'task-1', checked: true }] as any })).rejects.toThrow('Batch task updates are unavailable')
+    await expect(createTaskTool('/tmp').execute('task', { action: 'claim', list_id: 'x' })).rejects.toThrow('TaskSystem is unavailable')
+  })
+
+  test('Skill tool normalizes slash names and rejects missing or disabled skills', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'microcode-skill-tool-'))
+    try {
+      const filePath = join(cwd, 'SKILL.md')
+      await writeFile(filePath, 'skill content')
+      const tool = createSkillToolWithAgent({
+        getSkills: () => [
+          { name: 'alpha', description: 'Alpha', filePath, baseDir: cwd, disableModelInvocation: false },
+          { name: 'hidden', description: 'Hidden', filePath, baseDir: cwd, disableModelInvocation: true },
+        ],
+      })
+
+      const result = await tool.execute('skill', { skill: '/alpha' })
+      expect(result.details?.skillName).toBe('alpha')
+      expect(result.content[0]?.text).toContain('skill content')
+      await expect(tool.execute('skill', { skill: 'hidden' })).rejects.toThrow('cannot be invoked')
+      await expect(tool.execute('skill', { skill: 'missing' })).rejects.toThrow('not found')
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  test('swarm control tools call supervisor methods and status rate limit', async () => {
+    const calls: string[] = []
+    const supervisor = {
+      spawn: async (request: any) => {
+        calls.push(`spawn:${request.parentAgentId}:${request.description}`)
+        return { agentId: 'agent-1', description: request.description, status: 'queued', batchId: 'batch-1' }
+      },
+      send: async (agentId: string, message: string) => calls.push(`send:${agentId}:${message}`),
+      stop: async (agentId: string) => calls.push(`stop:${agentId}`),
+      delete: async (agentId: string) => calls.push(`delete:${agentId}`),
+      listAgents: () => [{ task: { agentId: 'agent-1', status: 'running', description: 'Work' }, activity: 'Reading' }],
+    } as any
+
+    expect((await createSpawnAgentTool(supervisor, 'parent').execute('spawn', { description: 'Work', prompt: 'Do work' })).content[0]?.text).toContain('Launched agent-1')
+    expect((await createSendAgentMessageTool(supervisor, 'parent').execute('msg', { agent_id: 'agent-1', message: 'next' })).content[0]?.text).toContain('Message sent')
+    expect((await createStopAgentTool(supervisor, 'parent').execute('stop', { agent_id: 'agent-1' })).content[0]?.text).toContain('Stopped')
+    expect((await createDeleteAgentTool(supervisor, 'parent').execute('delete', { agent_id: 'agent-1' })).content[0]?.text).toContain('Permanently deleted')
+    const status = createGetAgentStatusTool(supervisor, 'parent')
+    expect((await status.execute('status', {})).content[0]?.text).toContain('agent-1 running')
+    expect((await status.execute('status', {})).isError).toBe(true)
+    expect(calls).toContain('spawn:parent:Work')
+  })
+
+  test('MCP resource tools list and read client resources', async () => {
+    const client = {
+      getAllResources: () => [
+        { uri: 'file://a', name: 'A', serverName: 'srv', description: 'Desc' },
+        { uri: 'file://b', name: 'B', serverName: 'other' },
+      ],
+      readResource: async (serverName: string, uri: string) => ({
+        contents: [{ uri, text: `from ${serverName}`, mimeType: 'text/plain' }],
+      }),
+    } as any
+
+    const listed = await createListMcpResourcesTool(client).execute('list', { server: 'srv' })
+    expect(listed.content[0]?.text).toContain('file://a')
+    expect(listed.content[0]?.text).not.toContain('file://b')
+    const read = await createReadMcpResourceTool(client).execute('read', { server: 'srv', uri: 'file://a' })
+    expect(read.content[0]?.text).toContain('from srv')
+  })
+
+  test('ToolSearch discovers cached schemas, probes schemas, searches keywords, and reports misses', async () => {
+    const discovered: string[][] = []
+    const tool = createToolSearchTool({
+      getDeferredTools: () => [
+        {
+          name: 'mcp__demo__cached',
+          description: 'Cached browser tool',
+          defaultPermission: 'allow',
+          shouldDefer: true,
+          schema: '{"type":"object"}',
+          createTool: () => { throw new Error('should not probe cached schema') },
+        },
+        {
+          name: 'DeferredExample',
+          description: 'Example search target',
+          defaultPermission: 'allow',
+          shouldDefer: true,
+          createTool: () => ({
+            name: 'DeferredExample',
+            label: 'Deferred',
+            description: 'Deferred',
+            parameters: Type.Object({ value: Type.String() }),
+            execute: async () => ({ content: [] }),
+          } as any),
+        },
+      ],
+      onToolsDiscovered: (names) => discovered.push(names),
+    })
+
+    expect((await tool.execute('search', { query: 'select:mcp__demo__cached' })).content[0]?.text).toContain('"type"')
+    expect((await tool.execute('search', { query: 'example' })).content[0]?.text).toContain('DeferredExample')
+    expect((await tool.execute('search', { query: 'missing' })).details).toMatchObject({ matches: [] })
+    expect(discovered.flat()).toContain('mcp__demo__cached')
+  })
+})
