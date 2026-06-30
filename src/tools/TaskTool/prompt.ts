@@ -1,3 +1,4 @@
+/** Model-facing usage guide for the task tool's flat action schema. */
 export function getTaskToolSection(): string {
   return `# Task Tool
 

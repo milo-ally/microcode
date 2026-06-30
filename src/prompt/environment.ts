@@ -1,6 +1,8 @@
 import { execSync } from 'child_process'
 import { release as osRelease, type as osType, version as osVersion } from 'os'
 
+// Environment facts are generated at prompt-build time so model switches and
+// resumed sessions see the current cwd, shell, OS, and model identity.
 function getIsGit(cwd: string): boolean {
   try {
     execSync('git rev-parse --is-inside-work-tree', { cwd, stdio: 'ignore' })
@@ -33,6 +35,7 @@ function getShellInfoLine(): string {
   return `Shell: ${shell}`
 }
 
+/** Dynamic environment section shared by primary, resumed, and model-switched sessions. */
 export function getEnvInfoSection(
   cwd: string,
   modelId: string,

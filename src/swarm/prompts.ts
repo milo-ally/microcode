@@ -26,6 +26,7 @@ If you catch yourself about to call write, edit, bash, grep, or glob: **STOP. Sp
 - Write, edit, bash, grep, or glob directly. Spawn a worker.
 - Poll while waiting. Spawn new workers for pipeline steps — \`message\` the existing one. Leave worktrees.`
 
+/** Build the isolated worker suffix, including the exact tool allowlist granted by the coordinator. */
 export function getWorkerPrompt(
   parentAgentId: string,
   description: string,

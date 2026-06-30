@@ -1,5 +1,6 @@
 import { prependBullets } from '../prompt/format.ts'
 
+/** Prompt rules for using Microcode's tool system as a whole. */
 export function getUsingYourToolsSection(): string {
   const items = [
     `Do NOT use the bash tool to run commands when a relevant dedicated tool is provided. Using dedicated tools allows the user to better understand and review your work. This is CRITICAL to assisting the user:`,
@@ -10,6 +11,7 @@ export function getUsingYourToolsSection(): string {
   return [`# Using your tools`, ...prependBullets(items)].join(`\n`)
 }
 
+/** Lightweight index of deferred tools; full schemas are loaded via the search tool. */
 export function getDeferredToolsSection(deferredToolNames: string[] | undefined): string | null {
   if (!deferredToolNames || deferredToolNames.length === 0) return null
 

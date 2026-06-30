@@ -1,5 +1,12 @@
 import type { McpServerState } from './types.ts'
 
+/**
+ * MCP prompt section.
+ *
+ * This intentionally lists only connected tool names and descriptions. Full
+ * input schemas stay deferred and are exposed by ToolSearch for one selected
+ * MCP tool at a time.
+ */
 export function getMcpInstructionsSection(
   mcpServers: McpServerState[] | undefined,
 ): string | null {
@@ -14,6 +21,8 @@ export function getMcpInstructionsSection(
 
   const hasResources = connectedServers.some(s => s.resources.length > 0)
 
+  // Resources are small enough to list eagerly and are accessed through stable
+  // infrastructure tools, unlike MCP tool schemas which can be numerous.
   let resourceSection = ''
   if (hasResources) {
     const resourceList = connectedServers

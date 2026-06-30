@@ -15,6 +15,12 @@ import {
 } from './base.ts'
 import { getEnvInfoSection } from './environment.ts'
 
+/**
+ * Central prompt assembler.
+ *
+ * Keep prompt text in the domain module that owns the behavior. This file should
+ * only define ordering and cross-module composition for the final system prompt.
+ */
 export interface GetSystemPromptOptions {
   cwd: string
   modelId: string
@@ -30,6 +36,7 @@ function getSkillsInstructionsSection(skills: Skill[] | undefined): string | nul
   return formatSkillsForPrompt(skills)
 }
 
+/** Compose the model-facing system prompt in the order expected by the agent runtime. */
 export function getSystemPrompt(options: GetSystemPromptOptions): string[] {
   const { cwd, modelId, mcpServers, skills, deferredToolNames } = options
 

@@ -1,3 +1,4 @@
+/** Model-facing usage guide for the Ask tool. Keep it beside the tool contract. */
 export function getAskUserQuestionSection(): string {
   return `# Ask User Question Tool
 
