@@ -45,6 +45,18 @@ microcode --help
 bun run dev        # Start in dev mode (bun source)
 ```
 
+### Electron GUI
+
+```bash
+bun run dev:gui    # Build the Electron GUI and launch it
+bun run build:gui  # Build GUI assets only
+bun run start:gui  # Launch the previously built GUI
+```
+
+The GUI is a native Electron/Web interface, not an embedded terminal. It reuses
+the same agent runtime, session storage, MCP setup, permission system, and swarm
+supervisor as the TUI.
+
 ## Configuration
 
 ### API Keys & Model Selection

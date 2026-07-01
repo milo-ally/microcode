@@ -15,6 +15,9 @@
   },
   "scripts": {
     "dev": "bun run ./src/entry.ts",
+    "dev:gui": "bun run build-gui.ts && electron ./dist/gui/electron/main.cjs",
+    "start:gui": "electron ./dist/gui/electron/main.cjs",
+    "build:gui": "bun run build-gui.ts",
     "build": "bun run build.ts",
     "test": "bun test ./test"
   },
@@ -25,12 +28,18 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "chalk": "^5.5.0",
     "diff": "^9.0.0",
+    "electron": "^31.7.7",
+    "lucide-react": "^0.468.0",
     "marked": "^15.0.12",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typebox": "^1.1.24"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/diff": "^7.0.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
     "bun-types": "^1.3.14"
   },
   "peerDependencies": {
