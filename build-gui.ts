@@ -27,7 +27,7 @@ async function build() {
   }
 
   const preload = await Bun.build({
-    entrypoints: [join(root, 'src/gui/electron/preload.ts')],
+    entrypoints: [join(root, 'src/gui/preload/preload.ts')],
     outdir: electronOut,
     target: 'node',
     format: 'cjs',
@@ -39,10 +39,11 @@ async function build() {
     for (const log of preload.logs) console.error(log)
     throw new Error('Preload build failed.')
   }
-  await rename(join(electronOut, 'preload.js'), join(electronOut, 'preload.cjs'))
+  await mkdir(join(outDir, 'preload'), { recursive: true })
+  await rename(join(electronOut, 'preload.js'), join(outDir, 'preload', 'preload.cjs'))
 
   const main = await Bun.build({
-    entrypoints: [join(root, 'src/gui/electron/main.ts')],
+    entrypoints: [join(root, 'src/gui/main-process/main.ts')],
     outdir: electronOut,
     target: 'node',
     format: 'cjs',

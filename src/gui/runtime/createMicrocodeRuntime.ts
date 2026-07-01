@@ -40,6 +40,7 @@ import {
 } from '../../tools/registry.ts'
 import type {
   GuiChatItem,
+  GuiCommandItem,
   GuiIpcEvent,
   GuiApiConfigInput,
   GuiModelListItem,
@@ -452,40 +453,40 @@ export class MicrocodeRuntime {
         }
         break
       case '/status':
-        this.addNotice('info', this.formatStatus())
+        this.addCommandResult('/status', 'Runtime status')
         break
       case '/model':
         if (args) await this.setModel(args)
-        else this.addNotice('info', `Models: ${getAllModels().map((m) => m.id).join(', ')}`)
+        else this.addCommandResult('/model', 'Models')
         break
       case '/thinking':
         if (args) await this.setThinkingLevel(args as ThinkingLevel)
-        else this.addNotice('info', `Thinking: ${this.agent.getThinkingLevel()}`)
+        else this.addCommandResult('/thinking', 'Thinking level')
         break
       case '/permission':
         if (args) await this.setPermissionMode(args as PermissionMode)
-        else this.addNotice('info', `Permission mode: ${this.agent.getPermissionMode()}`)
+        else this.addCommandResult('/permission', 'Permission mode')
         break
       case '/mcp':
-        this.addNotice('info', this.mcpServers.length ? `MCP servers: ${this.mcpServers.map((s) => s.name).join(', ')}` : 'No MCP servers connected.')
+        this.addCommandResult('/mcp', 'MCP servers')
         break
       case '/agents':
-        this.addNotice('info', `Agents: ${this.supervisor.getRunningCount()}/${this.supervisor.getMaxWorkers()} running.`)
+        this.addCommandResult('/agents', 'Delegated agents')
         break
       case '/tasks':
-        this.addNotice('info', 'Tasks are visible in the Tasks sidebar.')
+        this.addCommandResult('/tasks', 'Tasks')
         break
       case '/session':
-        this.addNotice('info', `Session: ${this.sessionManager.getSessionId()?.slice(0, 8) ?? 'none'}`)
+        this.addCommandResult('/session', 'Session')
         break
       case '/skills':
-        this.addNotice('info', `Skills: ${this.agent.getSkills().map((skill: any) => skill.name).join(', ') || 'none'}`)
+        this.addCommandResult('/skills', 'Skills')
         break
       case '/new':
         await this.newSession()
         break
       case '/help':
-        this.addNotice('info', '/clear /compact /status /model /thinking /mcp /session /tasks /agents /new /permission /skills /exit /help')
+        this.addCommandResult('/help', 'Slash commands')
         break
       case '/exit':
         await this.shutdown()
@@ -995,6 +996,18 @@ export class MicrocodeRuntime {
     }
     this.timeline.push(item)
     this.emit({ type: 'notice', item })
+    this.emitTimeline()
+  }
+
+  private addCommandResult(command: string, title: string): void {
+    const item: GuiCommandItem = {
+      id: makeId('command'),
+      kind: 'command',
+      command,
+      title,
+      createdAt: Date.now(),
+    }
+    this.timeline.push(item)
     this.emitTimeline()
   }
 

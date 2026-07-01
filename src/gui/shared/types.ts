@@ -59,6 +59,14 @@ export interface GuiNoticeItem {
   createdAt: number
 }
 
+export interface GuiCommandItem {
+  id: string
+  kind: 'command'
+  command: string
+  title: string
+  createdAt: number
+}
+
 export interface GuiPermissionItem {
   id: string
   kind: 'permission'
@@ -75,6 +83,7 @@ export type GuiChatItem =
   | GuiMessageItem
   | GuiToolItem
   | GuiNoticeItem
+  | GuiCommandItem
   | GuiPermissionItem
 
 export interface GuiQuestionOption {

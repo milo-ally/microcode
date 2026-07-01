@@ -832,6 +832,318 @@ button {
   margin-top: auto;
 }
 
+.command-result {
+  max-width: 980px;
+  margin: 0 auto 16px;
+  border: 1px solid #242834;
+  border-radius: 12px;
+  background: #121620;
+  color: #d7dae3;
+  overflow: hidden;
+}
+
+.command-result-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  border-bottom: 1px solid #242834;
+  background: #151a25;
+  padding: 0 14px;
+}
+
+.command-result-head > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.command-result-head strong {
+  color: #f2f3f7;
+  font-size: 13px;
+}
+
+.command-result-head span {
+  color: #858b98;
+  font-size: 12px;
+}
+
+.command-metrics-grid,
+.command-model-grid,
+.command-server-grid,
+.command-skill-grid,
+.command-mode-grid,
+.command-help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  padding: 12px;
+}
+
+.command-metric,
+.command-model-card,
+.command-server-card,
+.command-skill-card,
+.command-mode-card,
+.command-help-row,
+.command-task-group,
+.command-current-model {
+  min-width: 0;
+  border: 1px solid #242834;
+  border-radius: 8px;
+  background: #141720;
+  color: #d7dae3;
+}
+
+.command-metric {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+}
+
+.command-metric span,
+.command-card-head span,
+.command-agent-row span,
+.command-task-row span,
+.command-session-row span,
+.command-model-card span,
+.command-model-card small,
+.command-skill-card span,
+.command-skill-card small,
+.command-help-row span {
+  color: #858b98;
+  font-size: 12px;
+}
+
+.command-metric strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f2f3f7;
+}
+
+.command-metric.accent {
+  border-color: #2e5a54;
+  background: #14211f;
+}
+
+.command-path-row,
+.command-current-model {
+  display: grid;
+  gap: 6px;
+  margin: 0 12px 12px;
+  padding: 12px;
+}
+
+.command-path-row {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  border-top: 1px solid #242834;
+  color: #858b98;
+}
+
+.command-path-row code,
+.command-current-model code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b8becb;
+}
+
+.command-current-model {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.command-current-model > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.command-current-model strong {
+  color: #f2f3f7;
+  font-size: 16px;
+}
+
+.command-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.command-result .command-chip {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  min-height: 24px;
+  border: 1px solid #2b3140;
+  border-radius: 999px;
+  background: #191e2a;
+  color: #b8becb;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.command-result .command-chip.ok,
+.command-model-card .ok {
+  color: #b5bd68;
+  border-color: #2f3e32;
+}
+
+.command-result .command-chip.bad,
+.command-model-card .bad {
+  color: #cc6666;
+  border-color: #4a3030;
+}
+
+.command-model-card,
+.command-skill-card,
+.command-mode-card,
+.command-help-row,
+.command-session-row {
+  display: grid;
+  gap: 5px;
+  text-align: left;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.command-model-card:hover,
+.command-model-card.current,
+.command-skill-card:hover,
+.command-skill-card.loaded,
+.command-mode-card:hover,
+.command-mode-card.current,
+.command-help-row:hover,
+.command-session-row:hover,
+.command-session-row.current {
+  border-color: #415269;
+  background: #1a202c;
+}
+
+.command-model-card strong,
+.command-skill-card strong,
+.command-session-row strong,
+.command-task-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f2f3f7;
+}
+
+.command-server-card,
+.command-task-group {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.command-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.command-card-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f2f3f7;
+}
+
+.command-agent-list,
+.command-task-list,
+.command-session-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.command-agent-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid #242834;
+  border-radius: 8px;
+  background: #141720;
+  padding: 10px;
+}
+
+.command-agent-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.command-agent-row small {
+  color: #858b98;
+}
+
+.command-task-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  border-top: 1px solid #242834;
+  padding-top: 7px;
+}
+
+.command-task-row.done strong {
+  color: #858b98;
+  text-decoration: line-through;
+}
+
+.command-session-row {
+  width: 100%;
+  grid-template-columns: minmax(0, 180px) minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid #242834;
+  border-radius: 8px;
+  background: #141720;
+  color: #d7dae3;
+}
+
+.command-skill-card.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.command-mode-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.command-help-row {
+  grid-template-columns: 86px minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid #242834;
+  background: #141720;
+}
+
+.command-help-row code {
+  color: #8abeb7;
+}
+
+.command-empty-state {
+  margin: 12px;
+  border: 1px dashed #2b3140;
+  border-radius: 8px;
+  color: #858b98;
+  padding: 16px;
+  text-align: center;
+}
+
 .notice-item {
   max-width: 980px;
   margin: 0 auto 12px;
@@ -1176,6 +1488,32 @@ button {
   .composer-wrap {
     padding-left: 14px;
     padding-right: 14px;
+  }
+}
+
+/* Final slash-menu placement: keep suggestions anchored to the composer itself. */
+.composer-stack {
+  position: relative;
+  width: min(760px, 100%);
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.slash-menu {
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(320px, 100%);
+}
+
+.slash-menu button.selected {
+  background: #1d212b;
+  color: #f2f3f7;
+}
+
+@media (min-width: 1500px) {
+  .composer-stack {
+    width: min(780px, 100%);
+    max-width: 780px;
   }
 }
 
@@ -1530,6 +1868,57 @@ button {
   .transcript {
     padding-left: 14px;
     padding-right: 14px;
+  }
+}
+
+/* Final slash-menu placement: keep suggestions anchored to the composer itself. */
+.composer-stack {
+  position: relative;
+  width: min(760px, 100%);
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.slash-menu {
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(320px, 100%);
+}
+
+.slash-menu button.selected {
+  background: #1d212b;
+  color: #f2f3f7;
+}
+
+@media (min-width: 1500px) {
+  .composer-stack {
+    width: min(780px, 100%);
+    max-width: 780px;
+  }
+}
+
+.composer-stack {
+  position: relative;
+  width: min(760px, 100%);
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.slash-menu {
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(320px, 100%);
+}
+
+.slash-menu button.selected {
+  background: #1d212b;
+  color: #f2f3f7;
+}
+
+@media (min-width: 1500px) {
+  .composer-stack {
+    width: min(780px, 100%);
+    max-width: 780px;
   }
 }
 
