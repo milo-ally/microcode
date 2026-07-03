@@ -4,9 +4,10 @@ import { homedir } from 'os'
 import { isAbsolute, join, resolve } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { createMicrocodeAgentRuntime, type MicrocodeAgent, type MicrocodeAgentEvent } from '../../agent/index.ts'
-import { getAllModels, getCustomModelDefs, resolveApiKey } from '../../models/index.ts'
+import { getAllModels, getCustomModelDefs, resetCustomModelCache, resolveApiKey } from '../../models/index.ts'
 import { McpClientManager } from '../../mcp/client.ts'
 import { loadMcpConfig, isMcpConfigEmpty } from '../../mcp/config.ts'
+import { mergeProjectMcpServers, mergeProjectModels } from '../../config/projectConfigWrite.ts'
 import { SessionManager, type SessionListItem } from '../../session/SessionManager.ts'
 import { AgentSupervisor } from '../../swarm/index.ts'
 import { SUPERVISOR_WORKER_PROMPT } from '../../swarm/prompts.ts'
@@ -890,6 +891,23 @@ export class MicrocodeRuntime {
     this.emitSnapshot()
   }
 
+  async addMcpConfig(rawJson: string) {
+    const result = await mergeProjectMcpServers(this.cwd, rawJson)
+    await this.reloadMcpServers()
+    this.addNotice('success', `Added MCP config: ${result.names.join(', ')}`)
+    this.emitSnapshot()
+    return result
+  }
+
+  async addModelConfig(rawJson: string) {
+    const result = await mergeProjectModels(this.cwd, rawJson)
+    resetCustomModelCache()
+    await this.refreshDerivedState()
+    this.addNotice('success', `Added model config: ${result.names.join(', ')}`)
+    this.emitSnapshot()
+    return result
+  }
+
   async shutdown(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
@@ -910,6 +928,21 @@ export class MicrocodeRuntime {
     } catch {
       this.tasks = []
     }
+  }
+
+  private async reloadMcpServers(): Promise<void> {
+    await this.mcpClient.disconnectAll()
+    const mcpConfigs = await loadMcpConfig(this.cwd)
+    if (!isMcpConfigEmpty(mcpConfigs)) {
+      await this.mcpClient.connectAll(mcpConfigs)
+    }
+    this.mcpServers = this.mcpClient.getServerStates()
+    for (const runtime of this.supervisor.registry.list()) {
+      runtime.configureMcpTools(this.mcpClient)
+      runtime.updateMcpServers(this.mcpServers)
+    }
+    this.agent.configureMcpTools(this.mcpClient)
+    this.agent.updateMcpServers(this.mcpServers)
   }
 
   private getModelList(): GuiModelListItem[] {

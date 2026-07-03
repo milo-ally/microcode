@@ -29,6 +29,8 @@ const api: GuiApi = {
     ipcRenderer.invoke('microcode:remindTask', listId, taskId, reminder),
   mcpAction: (action: 'enable' | 'disable' | 'reconnect', serverName: string) =>
     ipcRenderer.invoke('microcode:mcpAction', action, serverName),
+  addMcpConfig: (rawJson: string) => ipcRenderer.invoke('microcode:addMcpConfig', rawJson),
+  addModelConfig: (rawJson: string) => ipcRenderer.invoke('microcode:addModelConfig', rawJson),
   pickImages: () => ipcRenderer.invoke('microcode:pickImages'),
   answerPermission: (requestId: string, decision: GuiPermissionDecision) =>
     ipcRenderer.invoke('microcode:answerPermission', requestId, decision),

@@ -191,6 +191,12 @@ export interface GuiApiConfigInput {
   baseUrl?: string
 }
 
+export interface GuiConfigPasteResult {
+  path: string
+  count: number
+  names: string[]
+}
+
 export interface GuiApi {
   start(options?: { resume?: boolean; resumeSessionId?: string; modelId?: string; permissionMode?: PermissionMode; thinkingLevel?: ThinkingLevel }): Promise<{ snapshot: GuiRuntimeSnapshot; timeline: GuiChatItem[] }>
   prompt(input: GuiPromptInput): Promise<void>
@@ -207,6 +213,8 @@ export interface GuiApi {
   deleteAgent(agentId: string): Promise<void>
   remindTask(listId: string, taskId: string, reminder: boolean): Promise<void>
   mcpAction(action: 'enable' | 'disable' | 'reconnect', serverName: string): Promise<void>
+  addMcpConfig(rawJson: string): Promise<GuiConfigPasteResult>
+  addModelConfig(rawJson: string): Promise<GuiConfigPasteResult>
   pickImages(): Promise<string[]>
   answerPermission(requestId: string, decision: GuiPermissionDecision): Promise<void>
   answerQuestion(requestId: string, answers: Record<string, string>, block?: boolean): Promise<void>

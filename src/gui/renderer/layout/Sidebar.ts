@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Search, Server, Settings, Trash2, Workflow } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Plus, Server, Settings, Trash2, Workflow } from 'lucide-react'
 import { GlassSelect } from '../components/GlassSelect.ts'
 import { ApiConfigPanel } from '../features/settings/ApiConfigPanel.ts'
 import { cx } from '../lib/cx.ts'
@@ -14,6 +14,10 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
 }) {
   const [expandedAgents, setExpandedAgents] = useState<Record<string, boolean>>({})
   const [expandedTaskLists, setExpandedTaskLists] = useState<Record<string, boolean>>({})
+  const [mcpConfigText, setMcpConfigText] = useState('')
+  const [modelConfigText, setModelConfigText] = useState('')
+  const [configBusy, setConfigBusy] = useState<'mcp' | 'model' | null>(null)
+  const [configError, setConfigError] = useState<string | undefined>()
 
   if (!snapshot) {
     return React.createElement('aside', { className: 'sidebar' },
@@ -30,7 +34,6 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
         void window.microcode.newSession()
       },
     }, React.createElement(MessageSquare, { size: 18 }), '新聊天'),
-    React.createElement('button', { className: 'nav-row', onClick: () => setView('sessions') }, React.createElement(Search, { size: 18 }), '搜索聊天'),
     React.createElement('button', { className: cx('nav-row', view === 'sessions' && 'active'), onClick: () => setView('sessions') }, React.createElement(PanelLeft, { size: 18 }), '会话历史'),
     React.createElement('button', { className: cx('nav-row', view === 'agents' && 'active'), onClick: () => setView('agents') }, React.createElement(Workflow, { size: 18 }), '代理'),
     React.createElement('button', { className: cx('nav-row', view === 'tasks' && 'active'), onClick: () => setView('tasks') }, React.createElement(GitBranch, { size: 18 }), '任务'),
@@ -123,8 +126,31 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   }
 
   if (view === 'mcp') {
+    const submitMcpConfig = () => {
+      setConfigError(undefined)
+      setConfigBusy('mcp')
+      void window.microcode.addMcpConfig(mcpConfigText).then(() => {
+        setMcpConfigText('')
+      }).catch((error) => {
+        setConfigError(error instanceof Error ? error.message : String(error))
+      }).finally(() => setConfigBusy(null))
+    }
     return shell(React.createElement(React.Fragment, null,
       React.createElement('div', { className: 'panel-title' }, 'MCP Servers'),
+      React.createElement('div', { className: 'config-paste-panel' },
+        React.createElement('div', { className: 'sidebar-label' }, 'Add MCP config'),
+        React.createElement('textarea', {
+          placeholder: '{\n  "mcpServers": {\n    "my-server": {\n      "command": "node",\n      "args": ["server.js"]\n    }\n  }\n}',
+          value: mcpConfigText,
+          onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setMcpConfigText(event.currentTarget.value),
+        }),
+        configError && React.createElement('div', { className: 'config-error' }, configError),
+        React.createElement('button', {
+          className: 'wide-action',
+          disabled: configBusy !== null || !mcpConfigText.trim(),
+          onClick: submitMcpConfig,
+        }, React.createElement(Plus, { size: 14 }), configBusy === 'mcp' ? 'Adding...' : 'Add MCP config'),
+      ),
       snapshot.mcpServers.length === 0
         ? React.createElement('div', { className: 'empty' }, 'No MCP servers connected.')
         : snapshot.mcpServers.map((server) =>
@@ -209,6 +235,15 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   }
 
   if (view === 'settings') {
+    const submitModelConfig = () => {
+      setConfigError(undefined)
+      setConfigBusy('model')
+      void window.microcode.addModelConfig(modelConfigText).then(() => {
+        setModelConfigText('')
+      }).catch((error) => {
+        setConfigError(error instanceof Error ? error.message : String(error))
+      }).finally(() => setConfigBusy(null))
+    }
     return shell(React.createElement(React.Fragment, null,
       React.createElement('div', { className: 'panel-title' }, '模型与设置'),
       React.createElement('div', { className: 'setting-block' },
@@ -250,6 +285,20 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
         }),
       ),
       React.createElement(ApiConfigPanel, { snapshot }),
+      React.createElement('div', { className: 'config-paste-panel' },
+        React.createElement('div', { className: 'sidebar-label' }, 'Add custom model'),
+        React.createElement('textarea', {
+          placeholder: '{\n  "models": [{\n    "id": "my-model",\n    "name": "My Model",\n    "api": "openai-completions",\n    "baseUrl": "https://api.example.com/v1",\n    "contextWindow": 128000,\n    "maxTokens": 4096\n  }]\n}',
+          value: modelConfigText,
+          onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setModelConfigText(event.currentTarget.value),
+        }),
+        configError && React.createElement('div', { className: 'config-error' }, configError),
+        React.createElement('button', {
+          className: 'wide-action',
+          disabled: configBusy !== null || !modelConfigText.trim(),
+          onClick: submitModelConfig,
+        }, React.createElement(Plus, { size: 14 }), configBusy === 'model' ? 'Adding...' : 'Add model'),
+      ),
       React.createElement('div', { className: 'sidebar-section' },
         React.createElement('div', { className: 'sidebar-label' }, 'API Configuration'),
         React.createElement('div', { className: 'config-path' }, snapshot.config.userConfigPath),

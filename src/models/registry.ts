@@ -183,6 +183,10 @@ function getCustomModels(): Model<Api>[] {
   return _customModels
 }
 
+export function resetCustomModelCache(): void {
+  _customModels = null
+}
+
 // Env var names for model selection
 const MODEL_ENV_KEYS = ['OPENAI_MODEL', 'ANTHROPIC_MODEL', 'GEMINI_MODEL', 'MODEL'] as const
 

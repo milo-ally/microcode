@@ -8,6 +8,7 @@ export {
   resolveApiKey,
   getModelConfig,
   getCustomModelDefs,
+  resetCustomModelCache,
   type ModelConfig,
 } from './registry.ts'
 

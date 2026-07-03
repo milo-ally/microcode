@@ -54,6 +54,12 @@ export function registerIpc(): void {
   ipcMain.handle('microcode:mcpAction', async (_event, action: 'enable' | 'disable' | 'reconnect', serverName: string) => {
     await (await getRuntime()).mcpAction(action, serverName)
   })
+  ipcMain.handle('microcode:addMcpConfig', async (_event, rawJson: string) => {
+    return (await getRuntime()).addMcpConfig(rawJson)
+  })
+  ipcMain.handle('microcode:addModelConfig', async (_event, rawJson: string) => {
+    return (await getRuntime()).addModelConfig(rawJson)
+  })
   ipcMain.handle('microcode:pickImages', async () => {
     const result = await dialog.showOpenDialog(getMainWindow()!, {
       title: 'Upload images',
