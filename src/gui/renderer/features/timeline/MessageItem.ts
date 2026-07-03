@@ -5,6 +5,12 @@ import { cx } from '../../lib/cx.ts'
 import type { GuiChatItem } from '../../../shared/types.ts'
 
 export function MessageItem({ item }: { item: Extract<GuiChatItem, { kind: 'message' }> }) {
+  const isThinkingPlaceholder =
+    item.role === 'assistant' &&
+    item.streaming === true &&
+    item.blocks.length === 1 &&
+    item.blocks[0]?.type === 'text' &&
+    item.blocks[0].text === '正在思考...'
   return React.createElement('article', { className: cx('chat-item', item.role) },
     React.createElement('div', { className: 'avatar' }, item.role === 'assistant' ? React.createElement(Bot, { size: 16 }) : React.createElement(MessageSquare, { size: 16 })),
     React.createElement('div', { className: 'bubble' },
@@ -12,13 +18,22 @@ export function MessageItem({ item }: { item: Extract<GuiChatItem, { kind: 'mess
         React.createElement('span', null, item.role === 'assistant' ? 'Microcode' : 'You'),
         item.streaming && React.createElement('span', { className: 'streaming' }, 'streaming'),
       ),
-      item.blocks.length === 0
+      isThinkingPlaceholder
+        ? React.createElement('div', { className: 'thinking-placeholder' },
+            React.createElement('span', { className: 'mini-spinner' }),
+            React.createElement('span', null, '正在思考...'),
+          )
+        : item.blocks.length === 0
         ? React.createElement('div', { className: 'muted' }, '...')
         : item.blocks.map((block, index) => {
             if (block.type === 'thinking') {
               return React.createElement('div', { className: 'thinking-block', key: index },
-                React.createElement('div', { className: 'thinking-label' }, React.createElement(Sparkles, { size: 14 }), 'thinking'),
-                React.createElement('pre', null, block.thinking),
+                React.createElement('div', { className: 'thinking-label' },
+                  React.createElement(Sparkles, { size: 14 }),
+                  React.createElement('span', null, 'thinking'),
+                  item.streaming && React.createElement('span', { className: 'mini-spinner' }),
+                ),
+                React.createElement('div', { className: 'thinking-content' }, block.thinking || '正在思考...'),
               )
             }
             if (block.type === 'image') {

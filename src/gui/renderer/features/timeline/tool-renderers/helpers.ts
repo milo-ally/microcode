@@ -3,6 +3,7 @@ import {
   CircleCheck,
   CircleDashed,
   CircleX,
+  ChevronDown,
   Cpu,
   FileText,
   Globe,
@@ -63,12 +64,16 @@ export function ToolFrame({
   title,
   subtitle,
   children,
+  expanded = false,
+  onToggleExpanded,
 }: {
   item: GuiToolItem
   icon?: React.ReactNode
   title?: string
   subtitle?: string
   children?: React.ReactNode
+  expanded?: boolean
+  onToggleExpanded?: () => void
 }) {
   const Icon = item.status === 'complete'
     ? CircleCheck
@@ -76,7 +81,8 @@ export function ToolFrame({
       ? CircleX
       : CircleDashed
   const elapsed = item.elapsedMs !== undefined ? `${(item.elapsedMs / 1000).toFixed(1)}s` : undefined
-  return React.createElement('article', { className: `tool-item ${item.status}` },
+  const hasDetails = React.Children.count(children) > 0
+  return React.createElement('article', { className: `tool-item ${item.status}${expanded ? ' expanded' : ''}` },
     React.createElement('div', { className: 'tool-icon' }, icon ?? defaultIcon(item.toolName)),
     React.createElement('div', { className: 'tool-body' },
       React.createElement('div', { className: 'tool-head' },
@@ -84,10 +90,18 @@ export function ToolFrame({
         React.createElement('strong', null, title ?? item.toolName),
         React.createElement('span', { className: `tool-status ${item.status}` }, item.statusText ?? item.status),
         elapsed && React.createElement('span', { className: 'tool-time' }, elapsed),
+        hasDetails && onToggleExpanded && React.createElement('button', {
+          className: 'tool-detail-toggle',
+          onClick: onToggleExpanded,
+          title: expanded ? 'Collapse details' : 'Expand details',
+        }, React.createElement(ChevronDown, { size: 15 }), expanded ? 'Hide' : 'Details'),
       ),
       subtitle && React.createElement('div', { className: 'tool-subtitle' }, subtitle),
       !subtitle && React.createElement('div', { className: 'tool-args' }, textFromArgs(item.args)),
-      children,
+      hasDetails && React.createElement('div', {
+        className: `tool-details${expanded ? ' expanded' : ''}`,
+        'aria-hidden': !expanded,
+      }, children),
     ),
   )
 }
@@ -116,7 +130,7 @@ export function OutputBlock({
   preferTailWhileRunning?: boolean
 }) {
   const raw = (output ?? textOutput(item)).trimEnd()
-  if (!raw && item.status !== 'running') return null
+  if (!expanded && !raw) return null
   const lines = raw ? raw.split('\n') : []
   const visible = formatVisibleLines(lines, item.status === 'running', expanded, preferTailWhileRunning)
   const canExpand = lines.length > visible.displayedLineCount
@@ -172,4 +186,3 @@ function defaultIcon(toolName: string): React.ReactNode {
   if (/task/i.test(toolName)) return React.createElement(ListChecks, { size: 16 })
   return React.createElement(Cpu, { size: 16 })
 }
-

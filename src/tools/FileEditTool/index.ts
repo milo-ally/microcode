@@ -18,6 +18,8 @@ registerTool({
       typeof input.file_path === 'string' ? basename(input.file_path) : 'edit',
     status: ({ details }) => {
       if (!details) return 'Editing...'
+      if (details.phase === 'preparing') return 'Preparing...'
+      if (details.phase === 'writing') return 'Writing...'
       const additions = typeof details.additions === 'number' ? details.additions : 0
       const removals = typeof details.removals === 'number' ? details.removals : 0
       return `${additions}+ ${removals}-`

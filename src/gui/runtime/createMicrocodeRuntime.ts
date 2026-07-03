@@ -202,6 +202,9 @@ function normalizeSession(meta: SessionListItem): GuiSessionListItem {
   }
 }
 
+const LIVE_FILE_TOOL_MIN_MS = 350
+const LIVE_FILE_TOOL_NAMES = new Set(['write', 'edit'])
+
 export class MicrocodeRuntime {
   readonly agent: MicrocodeAgent
   readonly sessionManager: SessionManager
@@ -211,7 +214,10 @@ export class MicrocodeRuntime {
   private readonly timeline: GuiChatItem[] = []
   private readonly listeners = new Set<RuntimeListener>()
   private streamingMessageId?: string
+  private pendingAssistantMessageId?: string
   private pendingTools = new Map<string, GuiToolItem>()
+  private lastToolUpdateAt = new Map<string, number>()
+  private completionTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private pendingPermissions = new Map<string, PendingPermission>()
   private pendingQuestions = new Map<string, PendingQuestion>()
   private mcpServers = [] as ReturnType<McpClientManager['getServerStates']>
@@ -388,6 +394,10 @@ export class MicrocodeRuntime {
       this.addNotice('info', 'Already in this session.')
       return
     }
+    if (this.agent.isBusy()) {
+      this.addNotice('warning', '当前回复仍在进行中。请先停止或等待完成后再切换会话。')
+      return
+    }
     await this.agent.persistMessages()
     await this.supervisor.prepareSessionSwitch()
     const messages = await this.sessionManager.switchToSession(selected)
@@ -395,7 +405,9 @@ export class MicrocodeRuntime {
     this.agent.replaceMessages(messages, 'rebuild')
     this.timeline.length = 0
     this.pendingTools.clear()
+    this.clearToolTimers()
     this.streamingMessageId = undefined
+    this.pendingAssistantMessageId = undefined
     this.titleGenerated = Boolean(selected.title)
     this.restoreTimelineFromMessages(messages)
     await this.refreshDerivedState()
@@ -404,6 +416,10 @@ export class MicrocodeRuntime {
   }
 
   async newSession(): Promise<void> {
+    if (this.agent.isBusy()) {
+      this.addNotice('warning', '当前回复仍在进行中。请先停止或等待完成后再新建会话。')
+      return
+    }
     await this.agent.persistMessages()
     await this.supervisor.prepareSessionSwitch()
     await this.sessionManager.create(this.cwd)
@@ -411,7 +427,9 @@ export class MicrocodeRuntime {
     this.agent.clearMessages()
     this.timeline.length = 0
     this.pendingTools.clear()
+    this.clearToolTimers()
     this.streamingMessageId = undefined
+    this.pendingAssistantMessageId = undefined
     this.titleGenerated = false
     await this.refreshDerivedState()
     this.addNotice('success', `New session created: ${this.sessionManager.getSessionId()?.slice(0, 8)}`)
@@ -451,10 +469,22 @@ export class MicrocodeRuntime {
       createdAt: Date.now(),
     })
     await this.ensureSessionTitle(cleanText)
+    const thinkingId = makeId('assistant')
+    this.pendingAssistantMessageId = thinkingId
+    this.streamingMessageId = thinkingId
+    this.timeline.push({
+      id: thinkingId,
+      kind: 'message',
+      role: 'assistant',
+      blocks: [{ type: 'text', text: '正在思考...' }],
+      streaming: true,
+      createdAt: Date.now(),
+    })
     this.emitTimeline()
     try {
       await this.agent.prompt(cleanText, images)
     } catch (error) {
+      this.finishPendingAssistantError(error instanceof Error ? error.message : String(error))
       this.addNotice('error', error instanceof Error ? error.message : String(error))
     } finally {
       this.emitSnapshot()
@@ -468,6 +498,8 @@ export class MicrocodeRuntime {
       case '/clear':
         this.agent.clearMessages()
         this.timeline.length = 0
+        this.pendingTools.clear()
+        this.clearToolTimers()
         this.addNotice('success', 'Conversation cleared.')
         break
       case '/compact':
@@ -652,6 +684,7 @@ export class MicrocodeRuntime {
   async shutdown(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
+    this.clearToolTimers()
     await this.supervisor.shutdown()
     try {
       await this.agent.persistMessages()
@@ -788,16 +821,22 @@ export class MicrocodeRuntime {
     switch (event.type) {
       case 'message_start':
         if (event.message.role === 'assistant') {
-          const id = makeId('assistant')
+          const id = this.pendingAssistantMessageId ?? makeId('assistant')
           this.streamingMessageId = id
-          this.timeline.push({
-            id,
-            kind: 'message',
-            role: 'assistant',
-            blocks: extractMessageBlocks(event.message),
-            streaming: true,
-            createdAt: Date.now(),
-          })
+          const existing = this.timeline.find((entry) => entry.id === id)
+          if (existing?.kind === 'message') {
+            existing.blocks = extractMessageBlocks(event.message)
+            existing.streaming = true
+          } else {
+            this.timeline.push({
+              id,
+              kind: 'message',
+              role: 'assistant',
+              blocks: extractMessageBlocks(event.message),
+              streaming: true,
+              createdAt: Date.now(),
+            })
+          }
           this.emitTimeline()
         }
         break
@@ -811,6 +850,7 @@ export class MicrocodeRuntime {
         if (event.message.role === 'assistant') {
           this.updateStreamingMessage(event.message, false)
           this.streamingMessageId = undefined
+          this.pendingAssistantMessageId = undefined
           this.emitTimeline()
         }
         break
@@ -833,6 +873,7 @@ export class MicrocodeRuntime {
         })
         break
       case 'tool_execution_update':
+        this.lastToolUpdateAt.set(event.toolCallId, Date.now())
         this.updateTool(event.toolCallId, {
           status: 'running',
           statusText: formatToolStatusSafe(event.toolName, event.args ?? {}, event.partialResult.details),
@@ -842,7 +883,7 @@ export class MicrocodeRuntime {
         break
       case 'tool_execution_end':
         const toolInput = this.pendingTools.get(event.toolCallId)?.args ?? {}
-        this.updateTool(event.toolCallId, {
+        this.completeTool(event.toolCallId, event.toolName, {
           status: event.isError ? 'error' : 'complete',
           finishedAt: Date.now(),
           output: getTextFromToolResult({ ...event.result, isError: event.isError }),
@@ -894,6 +935,20 @@ export class MicrocodeRuntime {
     item.errorMessage = (message as any).errorMessage
   }
 
+  private finishPendingAssistantError(message: string): void {
+    const id = this.pendingAssistantMessageId
+    if (!id) return
+    const item = this.timeline.find((entry) => entry.id === id)
+    if (item?.kind === 'message') {
+      item.streaming = false
+      item.errorMessage = message
+      item.blocks = item.blocks.length > 0 ? item.blocks : [{ type: 'text', text: '请求失败。' }]
+    }
+    this.pendingAssistantMessageId = undefined
+    if (this.streamingMessageId === id) this.streamingMessageId = undefined
+    this.emitTimeline()
+  }
+
   private upsertTool(toolCallId: string, patch: Omit<Partial<GuiToolItem>, 'kind' | 'id'> & { toolCallId: string; toolName: string; args: Record<string, unknown> }): void {
     let item = this.pendingTools.get(toolCallId)
     if (!item) {
@@ -922,6 +977,37 @@ export class MicrocodeRuntime {
       this.pendingTools.delete(toolCallId)
     }
     this.emitTimeline()
+  }
+
+  private completeTool(toolCallId: string, toolName: string, patch: Partial<GuiToolItem>): void {
+    const existingTimer = this.completionTimers.get(toolCallId)
+    if (existingTimer) clearTimeout(existingTimer)
+    this.completionTimers.delete(toolCallId)
+
+    const lastUpdateAt = this.lastToolUpdateAt.get(toolCallId)
+    const elapsed = lastUpdateAt === undefined ? Number.POSITIVE_INFINITY : Date.now() - lastUpdateAt
+    const remaining = LIVE_FILE_TOOL_NAMES.has(toolName)
+      ? Math.max(0, LIVE_FILE_TOOL_MIN_MS - elapsed)
+      : 0
+
+    if (remaining <= 0) {
+      this.updateTool(toolCallId, patch)
+      this.lastToolUpdateAt.delete(toolCallId)
+      return
+    }
+
+    const timer = setTimeout(() => {
+      this.completionTimers.delete(toolCallId)
+      this.updateTool(toolCallId, patch)
+      this.lastToolUpdateAt.delete(toolCallId)
+    }, remaining)
+    this.completionTimers.set(toolCallId, timer)
+  }
+
+  private clearToolTimers(): void {
+    for (const timer of this.completionTimers.values()) clearTimeout(timer)
+    this.completionTimers.clear()
+    this.lastToolUpdateAt.clear()
   }
 
   private requestPermission(

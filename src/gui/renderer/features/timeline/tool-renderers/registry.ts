@@ -1,16 +1,19 @@
+import { AgentControlToolRenderer } from './AgentControlToolRenderer.ts'
+import { AskToolRenderer } from './AskToolRenderer.ts'
 import { BashToolRenderer } from './BashToolRenderer.ts'
-import {
-  AgentControlToolRenderer,
-  AskToolRenderer,
-  FallbackToolRenderer,
-  McpToolRenderer,
-  SkillToolRenderer,
-  TaskToolRenderer,
-  ToolSearchRenderer,
-  VisionToolRenderer,
-} from './ControlToolRenderers.ts'
-import { FileEditToolRenderer, FileReadToolRenderer, FileWriteToolRenderer } from './FileToolRenderers.ts'
-import { GlobToolRenderer, GrepToolRenderer, WebFetchToolRenderer, WebSearchToolRenderer } from './SearchToolRenderers.ts'
+import { FallbackToolRenderer } from './FallbackToolRenderer.ts'
+import { FileEditToolRenderer } from './FileEditToolRenderer.ts'
+import { FileReadToolRenderer } from './FileReadToolRenderer.ts'
+import { FileWriteToolRenderer } from './FileWriteToolRenderer.ts'
+import { GlobToolRenderer } from './GlobToolRenderer.ts'
+import { GrepToolRenderer } from './GrepToolRenderer.ts'
+import { McpToolRenderer } from './McpToolRenderer.ts'
+import { SkillToolRenderer } from './SkillToolRenderer.ts'
+import { TaskToolRenderer } from './TaskToolRenderer.ts'
+import { ToolSearchRenderer } from './ToolSearchRenderer.ts'
+import { VisionToolRenderer } from './VisionToolRenderer.ts'
+import { WebFetchToolRenderer } from './WebFetchToolRenderer.ts'
+import { WebSearchToolRenderer } from './WebSearchToolRenderer.ts'
 import type { ToolRenderer } from './types.ts'
 
 const renderers = new Map<string, ToolRenderer>([

@@ -31,7 +31,7 @@ export interface FileWriteToolDetails {
   removals: number
   isNewFile: boolean
   preview?: string
-  phase?: 'writing' | 'complete'
+  phase?: 'preparing' | 'writing' | 'complete'
   warning?: string
   written?: boolean
 }
@@ -120,6 +120,19 @@ export function createFileWriteTool(
       const filePath = isAbsolute(params.file_path)
         ? params.file_path
         : resolve(cwd, params.file_path)
+
+      onUpdate?.({
+        content: [{ type: 'text', text: `Preparing write ${filePath}` }],
+        details: {
+          path: filePath,
+          bytesWritten: Buffer.byteLength(params.content, 'utf8'),
+          additions: countContentLines(params.content),
+          removals: 0,
+          isNewFile: false,
+          phase: 'preparing',
+        },
+      })
+
       const invocationRevision = writeRevisions.get(filePath) ?? 0
       const initial = await snapshotFile(filePath)
 

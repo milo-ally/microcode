@@ -24,7 +24,7 @@ export interface FileEditToolDetails {
   replacements: number
   additions: number
   removals: number
-  phase?: 'writing' | 'complete'
+  phase?: 'preparing' | 'writing' | 'complete'
 }
 
 export function createFileEditTool(cwd: string): AgentTool<typeof editSchema, FileEditToolDetails> {
@@ -43,6 +43,17 @@ export function createFileEditTool(cwd: string): AgentTool<typeof editSchema, Fi
       const filePath = isAbsolute(params.file_path)
         ? params.file_path
         : resolve(cwd, params.file_path)
+
+      onUpdate?.({
+        content: [{ type: 'text', text: `Preparing edit ${filePath}` }],
+        details: {
+          path: filePath,
+          replacements: 0,
+          additions: 0,
+          removals: 0,
+          phase: 'preparing',
+        },
+      })
 
       const content = await readFile(filePath, 'utf-8')
 

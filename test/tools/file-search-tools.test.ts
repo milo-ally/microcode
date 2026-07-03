@@ -32,7 +32,7 @@ describe('file and search tools', () => {
       }, undefined, (update) => updates.push(update))
       expect(writeResult.details?.written).toBe(true)
       expect(writeResult.details?.isNewFile).toBe(true)
-      expect(updates[0].details.phase).toBe('writing')
+      expect(updates.map((update) => update.details.phase)).toEqual(['preparing', 'writing'])
 
       const readResult = await read.execute('read', {
         file_path: 'notes/todo.txt',
@@ -42,12 +42,14 @@ describe('file and search tools', () => {
       expect(readResult.content[0]?.text).toContain('2\ttwo')
       expect(readResult.details?.returnedLines).toBe(1)
 
+      const editUpdates: any[] = []
       const editResult = await edit.execute('edit', {
         file_path: 'notes/todo.txt',
         old_string: 'two',
         new_string: 'three',
-      })
+      }, undefined, (update) => editUpdates.push(update))
       expect(editResult.details?.replacements).toBe(1)
+      expect(editUpdates.map((update) => update.details.phase)).toEqual(['preparing', 'writing'])
       expect(await readFile(join(cwd, 'notes', 'todo.txt'), 'utf-8')).toBe('one\nthree\n')
     } finally {
       await rm(cwd, { recursive: true, force: true })

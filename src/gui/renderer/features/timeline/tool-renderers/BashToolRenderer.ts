@@ -14,6 +14,8 @@ export function BashToolRenderer({ item, expanded, onToggleExpanded }: ToolRende
     icon: React.createElement(Terminal, { size: 16 }),
     title: 'bash',
     subtitle,
+    expanded,
+    onToggleExpanded,
   },
     exitCode !== undefined && item.status !== 'running' && React.createElement('div', {
       className: `tool-exit ${exitCode === 0 ? 'ok' : 'error'}`,
@@ -28,4 +30,3 @@ export function BashToolRenderer({ item, expanded, onToggleExpanded }: ToolRende
     }),
   )
 }
-

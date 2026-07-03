@@ -77,7 +77,7 @@ export function App() {
         React.createElement(ActivityButton, { active: view === 'settings', label: 'Settings', icon: React.createElement(Settings, { size: 21 }), onClick: () => setView('settings') }),
       ),
     ),
-    !sidebarCollapsed && React.createElement(Sidebar, {
+    React.createElement(Sidebar, {
       view,
       snapshot,
       setView,

@@ -18,6 +18,8 @@ registerTool({
       typeof input.file_path === 'string' ? basename(input.file_path) : 'write',
     status: ({ details }) => {
       if (!details) return 'Writing...'
+      if (details.phase === 'preparing') return 'Preparing...'
+      if (details.phase === 'writing') return 'Writing...'
       const bytes = typeof details.bytesWritten === 'number' ? details.bytesWritten : 0
       return bytes > 0 ? formatBytes(bytes) : 'Writing...'
     },
