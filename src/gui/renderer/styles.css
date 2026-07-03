@@ -693,6 +693,76 @@ button {
   line-height: 1.45;
 }
 
+.tool-code-preview {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid #242834;
+  border-radius: 7px;
+  background: #0b0d12;
+}
+
+.tool-code-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  border-bottom: 1px solid #242834;
+  background: #11141c;
+  color: #9fa6b6;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.tool-code-frame {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  background: transparent;
+  color: #cdd1dc;
+  padding: 8px 0;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tool-code-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: max-content;
+  padding: 0 10px;
+  white-space: pre;
+}
+
+.tool-code-line.add {
+  display: block;
+  background: rgba(181, 189, 104, 0.12);
+  color: #c7d27d;
+}
+
+.tool-code-line.remove {
+  display: block;
+  background: rgba(204, 102, 102, 0.12);
+  color: #dd8a8a;
+}
+
+.tool-code-gutter {
+  user-select: none;
+  color: #666d7c;
+  padding-right: 12px;
+  text-align: right;
+}
+
+.tool-code-text {
+  min-width: 0;
+}
+
+.tool-code-omitted {
+  color: #666d7c;
+  padding: 3px 10px 0;
+  font-style: italic;
+}
+
 .tool-stream {
   margin-top: 9px;
   border: 1px solid #242834;

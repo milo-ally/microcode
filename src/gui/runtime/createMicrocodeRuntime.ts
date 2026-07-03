@@ -296,6 +296,7 @@ export function getStreamingToolDetails(
       additions: countStreamingLines(content),
       removals: 0,
       isNewFile: resolvedPath ? !existsSync(resolvedPath) : false,
+      preview: content.slice(0, 4000),
       phase: 'preparing',
     }
   }

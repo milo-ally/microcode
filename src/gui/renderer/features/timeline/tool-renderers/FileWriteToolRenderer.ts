@@ -1,11 +1,40 @@
 import React from 'react'
 import { FileUp } from 'lucide-react'
-import { formatBytes, getDetailNumber, getDetailString, MetricRow, OutputBlock, shortPath, ToolFrame } from './helpers.ts'
+import { formatBytes, getDetailNumber, getDetailString, MetricRow, shortPath, ToolFrame } from './helpers.ts'
 import type { ToolRendererProps } from './types.ts'
+
+const INLINE_PREVIEW_LINES = 10
+const EXPANDED_PREVIEW_LINES = 80
+
+function inlineCodePreview(content: string, expanded: boolean): React.ReactNode {
+  const lines = content.split('\n')
+  const limit = expanded ? EXPANDED_PREVIEW_LINES : INLINE_PREVIEW_LINES
+  const shown = lines.slice(0, limit)
+  const truncated = lines.length > shown.length
+  const gutterWidth = String(Math.max(1, shown.length)).length
+
+  return React.createElement('div', { className: 'tool-code-preview' },
+    React.createElement('div', { className: 'tool-code-preview-head' },
+      React.createElement('span', null, 'Content'),
+      React.createElement('span', null, `${lines.length.toLocaleString()} lines`),
+    ),
+    React.createElement('pre', { className: 'tool-code-frame' },
+      shown.map((line, index) =>
+        React.createElement('div', { className: 'tool-code-line', key: `${index}-${line}` },
+          React.createElement('span', { className: 'tool-code-gutter' }, String(index + 1).padStart(gutterWidth, ' ')),
+          React.createElement('span', { className: 'tool-code-text' }, line || ' '),
+        ),
+      ),
+      truncated && React.createElement('div', { className: 'tool-code-omitted', key: 'omitted' },
+        `... ${lines.length - shown.length} more lines`,
+      ),
+    ),
+  )
+}
 
 export function FileWriteToolRenderer({ item, expanded, onToggleExpanded }: ToolRendererProps) {
   const path = getDetailString(item.details, 'path') ?? (typeof item.args.file_path === 'string' ? item.args.file_path : '')
-  const previewText = getDetailString(item.details, 'preview')
+  const previewText = getDetailString(item.details, 'preview') ?? (typeof item.args.content === 'string' ? item.args.content : '')
   const warning = getDetailString(item.details, 'warning')
   const additions = getDetailNumber(item.details, 'additions')
   const removals = getDetailNumber(item.details, 'removals')
@@ -36,12 +65,6 @@ export function FileWriteToolRenderer({ item, expanded, onToggleExpanded }: Tool
       ],
     }),
     warning && React.createElement('div', { className: 'tool-warning' }, warning),
-    previewText && React.createElement(OutputBlock, {
-      item,
-      output: previewText,
-      expanded,
-      onToggleExpanded,
-      label: 'Preview',
-    }),
+    previewText && inlineCodePreview(previewText, expanded),
   )
 }
