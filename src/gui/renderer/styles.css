@@ -596,11 +596,82 @@ button {
   color: #cc6666;
 }
 
+.tool-state-icon {
+  display: inline-flex;
+  align-items: center;
+  color: #858b98;
+}
+
+.tool-state-icon.running,
+.tool-state-icon.pending {
+  color: #f0c674;
+}
+
+.tool-state-icon.complete {
+  color: #b5bd68;
+}
+
+.tool-state-icon.error {
+  color: #cc6666;
+}
+
+.tool-subtitle {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #cdd1dc;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .tool-args {
   min-width: 0;
   overflow-wrap: anywhere;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
+}
+
+.tool-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.tool-metrics span,
+.tool-exit,
+.tool-line-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid #2b3140;
+  border-radius: 999px;
+  background: #11141c;
+  color: #9fa6b6;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.tool-exit {
+  width: fit-content;
+  margin-top: 9px;
+}
+
+.tool-exit.ok {
+  border-color: #2f3e32;
+  color: #b5bd68;
+}
+
+.tool-exit.error {
+  border-color: #4a3030;
+  color: #cc6666;
+}
+
+.tool-warning {
+  margin-top: 9px;
+  color: #f0c674;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .tool-stream {
@@ -621,6 +692,25 @@ button {
   color: #9fa6b6;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.tool-stream-head .tool-line-count {
+  margin-left: auto;
+}
+
+.tool-toggle {
+  min-height: 22px;
+  border: 1px solid #2b3140;
+  border-radius: 999px;
+  background: #161a23;
+  color: #cdd1dc;
+  padding: 0 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tool-toggle:hover {
+  background: #1d212b;
 }
 
 .live-dot {
@@ -659,6 +749,34 @@ button {
   padding: 10px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
+}
+
+.tool-task-list {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #cdd1dc;
+  font-size: 12px;
+}
+
+.tool-task-list li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+}
+
+.tool-task-list li span {
+  color: #858b98;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+
+.tool-task-list li.complete {
+  color: #858b98;
 }
 
 .agent-activity-panel {

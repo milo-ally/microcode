@@ -47,6 +47,8 @@ export interface GuiToolItem {
   finishedAt?: number
   elapsedMs?: number
   output?: string
+  statusText?: string
+  summary?: string
   details?: Record<string, unknown>
   isError?: boolean
 }

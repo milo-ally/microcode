@@ -35,6 +35,7 @@ import {
 import { modelSupportsImages } from '../../models/index.ts'
 import {
   formatToolActivity,
+  formatToolSummary,
   formatToolStatus,
   type ToolResult,
 } from '../../tools/registry.ts'
@@ -124,6 +125,30 @@ function getTextFromToolResult(result?: ToolResult): string {
     .filter((block) => block.type === 'text')
     .map((block) => block.text ?? '')
     .join('\n')
+}
+
+function formatToolStatusSafe(
+  toolName: string,
+  input: Record<string, unknown>,
+  details?: Record<string, unknown>,
+): string | undefined {
+  try {
+    return formatToolStatus(toolName, input, details)
+  } catch {
+    return undefined
+  }
+}
+
+function formatToolSummarySafe(
+  toolName: string,
+  result: ToolResult,
+  input: Record<string, unknown>,
+): string | undefined {
+  try {
+    return formatToolSummary(toolName, result, input)
+  } catch {
+    return undefined
+  }
 }
 
 function extractMessageBlocks(message: AgentMessage): GuiMessageBlock[] {
@@ -803,21 +828,26 @@ export class MicrocodeRuntime {
           toolName: event.toolName,
           args: event.args ?? {},
           status: 'running',
+          statusText: formatToolStatusSafe(event.toolName, event.args ?? {}),
           startedAt: Date.now(),
         })
         break
       case 'tool_execution_update':
         this.updateTool(event.toolCallId, {
           status: 'running',
+          statusText: formatToolStatusSafe(event.toolName, event.args ?? {}, event.partialResult.details),
           output: getTextFromToolResult({ ...event.partialResult, isError: false }),
           details: event.partialResult.details,
         })
         break
       case 'tool_execution_end':
+        const toolInput = this.pendingTools.get(event.toolCallId)?.args ?? {}
         this.updateTool(event.toolCallId, {
           status: event.isError ? 'error' : 'complete',
           finishedAt: Date.now(),
           output: getTextFromToolResult({ ...event.result, isError: event.isError }),
+          statusText: formatToolStatusSafe(event.toolName, toolInput, event.result.details),
+          summary: formatToolSummarySafe(event.toolName, { ...event.result, isError: event.isError }, toolInput),
           details: event.result.details,
           isError: event.isError,
         })
