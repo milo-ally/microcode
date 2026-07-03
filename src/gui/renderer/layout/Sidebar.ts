@@ -63,23 +63,24 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
     const selectedAgent = snapshot.agents.find((agent) => agent.task.agentId === selectedAgentId)
       ?? snapshot.agents[0]
     const recentTools = selectedAgent?.toolHistory.slice(-8) ?? []
+    const agentOptions = snapshot.agents.map((agent, index) => ({
+      value: agent.task.agentId,
+      label: agent.task.description || agent.identity.name || `Agent ${index + 1}`,
+      meta: agent.activity || agent.task.status,
+    }))
     return shell(React.createElement(React.Fragment, null,
       React.createElement('div', { className: 'panel-title' }, `代理 ${snapshot.runningWorkers}/${snapshot.maxWorkers}`),
       snapshot.agents.length === 0
         ? React.createElement('div', { className: 'empty' }, 'No delegated agents yet.')
         : React.createElement(React.Fragment, null,
-          snapshot.agents.map((agent) =>
-            React.createElement('button', {
-              className: cx('side-row interactive', selectedAgent?.task.agentId === agent.task.agentId && 'active'),
-              key: agent.task.id,
-              onClick: () => setSelectedAgentId(agent.task.agentId),
-            },
-              React.createElement('span', { className: cx('status-dot', agent.task.status) }),
-              React.createElement('div', { className: 'side-row-main' },
-                React.createElement('strong', null, agent.task.description || agent.identity.name || agent.identity.id),
-                React.createElement('span', null, agent.activity || agent.task.status),
-              ),
-            ),
+          React.createElement('div', { className: 'sidebar-picker' },
+            React.createElement('div', { className: 'sidebar-label' }, 'Agent'),
+            React.createElement(GlassSelect, {
+              value: selectedAgent?.task.agentId ?? agentOptions[0]?.value ?? '',
+              ariaLabel: 'Agent',
+              onChange: setSelectedAgentId,
+              options: agentOptions,
+            }),
           ),
           selectedAgent && React.createElement('div', { className: 'detail-card' },
             React.createElement('div', { className: 'detail-card-head' },
@@ -145,6 +146,11 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   if (view === 'tasks') {
     const selectedList = snapshot.tasks.find((list) => list.id === selectedTaskListId)
       ?? snapshot.tasks[0]
+    const taskOptions = snapshot.tasks.map((task) => ({
+      value: task.id,
+      label: task.title,
+      meta: `${task.tasks.filter((item) => item.completed).length}/${task.tasks.length}`,
+    }))
     const stats = selectedList?.stats ?? (selectedList ? {
       total: selectedList.tasks.length,
       completed: selectedList.tasks.filter((task) => task.completed).length,
@@ -156,18 +162,14 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
       snapshot.tasks.length === 0
         ? React.createElement('div', { className: 'empty' }, '当前 session 还没有任务。')
         : React.createElement(React.Fragment, null,
-          React.createElement('div', { className: 'task-list-picker' },
-            snapshot.tasks.map((task) =>
-              React.createElement('button', {
-                className: cx('task-list-row', selectedList?.id === task.id && 'active'),
-                key: task.id,
-                onClick: () => setSelectedTaskListId(task.id),
-              },
-                React.createElement(FileText, { size: 15 }),
-                React.createElement('span', null, task.title),
-                React.createElement('small', null, `${task.tasks.filter((item) => item.completed).length}/${task.tasks.length}`),
-              ),
-            ),
+          React.createElement('div', { className: 'sidebar-picker' },
+            React.createElement('div', { className: 'sidebar-label' }, 'Task list'),
+            React.createElement(GlassSelect, {
+              value: selectedList?.id ?? taskOptions[0]?.value ?? '',
+              ariaLabel: 'Task list',
+              onChange: setSelectedTaskListId,
+              options: taskOptions,
+            }),
           ),
           selectedList && React.createElement('div', { className: 'detail-card task-detail-card' },
             React.createElement('div', { className: 'detail-card-head' },

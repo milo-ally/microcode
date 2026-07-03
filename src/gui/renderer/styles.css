@@ -370,6 +370,12 @@ button {
   font-size: 13px;
 }
 
+.sidebar-picker {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
 .icon-danger-button {
   display: inline-flex;
   align-items: center;
@@ -3223,6 +3229,94 @@ textarea {
 
   .sidebar {
     display: none;
+  }
+
+  .sidebar-resizer {
+    display: none;
+  }
+
+  .transcript,
+  .composer-wrap {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
+/* Resizable sidebar overrides. Keep this late so it wins over earlier shell passes. */
+.app-shell {
+  --sidebar-width: 260px;
+  grid-template-columns: var(--sidebar-width) 1px minmax(0, 1fr);
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.app-shell.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.app-shell.sidebar-resizing * {
+  cursor: col-resize !important;
+}
+
+.sidebar-resizer {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: stretch;
+  justify-self: center;
+  width: 9px;
+  min-width: 9px;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  padding: 0;
+  position: relative;
+  z-index: 20;
+}
+
+.sidebar-resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  background: #1f1f1f;
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.sidebar-resizer:hover::before,
+.app-shell.sidebar-resizing .sidebar-resizer::before {
+  background: #8abeb7;
+  box-shadow: 0 0 0 1px rgba(138, 190, 183, 0.18);
+}
+
+.transcript {
+  padding-left: max(44px, calc((100vw - var(--sidebar-width) - 920px) / 2));
+  padding-right: max(44px, calc((100vw - var(--sidebar-width) - 920px) / 2));
+}
+
+.composer-wrap {
+  padding-left: max(44px, calc((100vw - var(--sidebar-width) - 760px) / 2));
+  padding-right: max(44px, calc((100vw - var(--sidebar-width) - 760px) / 2));
+}
+
+@media (min-width: 1500px) {
+  .transcript {
+    padding-left: max(56px, calc((100vw - var(--sidebar-width) - 960px) / 2));
+    padding-right: max(56px, calc((100vw - var(--sidebar-width) - 960px) / 2));
+  }
+
+  .composer-wrap {
+    padding-left: max(56px, calc((100vw - var(--sidebar-width) - 780px) / 2));
+    padding-right: max(56px, calc((100vw - var(--sidebar-width) - 780px) / 2));
+  }
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .transcript,

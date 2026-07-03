@@ -17,11 +17,22 @@ import { Sidebar } from '../layout/Sidebar.ts'
 import { StatusBar } from '../layout/StatusBar.ts'
 import { cx } from '../lib/cx.ts'
 import type { View } from './viewTypes.ts'
+import type { CSSProperties } from 'react'
 import type {
   GuiChatItem,
   GuiIpcEvent,
   GuiRuntimeSnapshot,
 } from '../../shared/types.ts'
+
+const SIDEBAR_WIDTH_KEY = 'microcode.sidebarWidth'
+const DEFAULT_SIDEBAR_WIDTH = 280
+const MIN_SIDEBAR_WIDTH = 160
+const MAX_SIDEBAR_WIDTH = 1200
+
+function clampSidebarWidth(width: number) {
+  const viewportMax = typeof window === 'undefined' ? MAX_SIDEBAR_WIDTH : Math.max(240, window.innerWidth - 320)
+  return Math.round(Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), Math.min(MAX_SIDEBAR_WIDTH, viewportMax)))
+}
 
 export function App() {
   const [view, setView] = useState<View>('chat')
@@ -29,6 +40,11 @@ export function App() {
   const [snapshot, setSnapshot] = useState<GuiRuntimeSnapshot>()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarResizing, setSidebarResizing] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY))
+    return Number.isFinite(saved) && saved > 0 ? clampSidebarWidth(saved) : DEFAULT_SIDEBAR_WIDTH
+  })
 
   useEffect(() => {
     const off = window.microcode.onEvent((event: GuiIpcEvent) => {
@@ -82,7 +98,30 @@ export function App() {
     }
   }, [])
 
-  return React.createElement('div', { className: cx('app-shell', sidebarCollapsed && 'sidebar-collapsed') },
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))
+  }, [sidebarWidth])
+
+  useEffect(() => {
+    if (!sidebarResizing) return
+    const move = (event: PointerEvent) => setSidebarWidth(clampSidebarWidth(event.clientX))
+    const stop = () => setSidebarResizing(false)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+  }, [sidebarResizing])
+
+  const shellStyle = { '--sidebar-width': `${sidebarWidth}px` } as CSSProperties
+
+  return React.createElement('div', {
+    className: cx('app-shell', sidebarCollapsed && 'sidebar-collapsed', sidebarResizing && 'sidebar-resizing'),
+    style: shellStyle,
+  },
     React.createElement('nav', { className: 'activitybar' },
       React.createElement('div', { className: 'activity-top' },
         React.createElement(ActivityButton, { active: view === 'chat', label: 'Chat', icon: React.createElement(MessageSquare, { size: 21 }), onClick: () => setView('chat') }),
@@ -101,6 +140,18 @@ export function App() {
       snapshot,
       setView,
       onToggleCollapse: () => setSidebarCollapsed(true),
+    }),
+    !sidebarCollapsed && React.createElement('button', {
+      className: 'sidebar-resizer',
+      type: 'button',
+      title: '拖动调整侧边栏宽度',
+      'aria-label': '拖动调整侧边栏宽度',
+      'aria-orientation': 'vertical',
+      role: 'separator',
+      onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+        event.preventDefault()
+        setSidebarResizing(true)
+      },
     }),
     React.createElement('section', { className: cx('workbench', timeline.length === 0 && 'empty-state') },
       sidebarCollapsed && React.createElement('button', {
