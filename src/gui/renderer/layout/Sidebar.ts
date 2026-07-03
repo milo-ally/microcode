@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Search, Server, Settings, Trash2, Workflow } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Search, Server, Settings, Trash2, Workflow } from 'lucide-react'
 import { GlassSelect } from '../components/GlassSelect.ts'
 import { ApiConfigPanel } from '../features/settings/ApiConfigPanel.ts'
 import { cx } from '../lib/cx.ts'
@@ -12,9 +12,8 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   setView: (view: View) => void
   onToggleCollapse: () => void
 }) {
-  const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>()
-  const [selectedTaskListId, setSelectedTaskListId] = useState<string | undefined>()
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
+  const [expandedAgents, setExpandedAgents] = useState<Record<string, boolean>>({})
+  const [expandedTaskLists, setExpandedTaskLists] = useState<Record<string, boolean>>({})
 
   if (!snapshot) {
     return React.createElement('aside', { className: 'sidebar' },
@@ -61,61 +60,63 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   )
 
   if (view === 'agents') {
-    const selectedAgent = snapshot.agents.find((agent) => agent.task.agentId === selectedAgentId)
-      ?? snapshot.agents[0]
-    const recentTools = selectedAgent?.toolHistory.slice(-8) ?? []
-    const agentOptions = snapshot.agents.map((agent, index) => ({
-      value: agent.task.agentId,
-      label: agent.task.description || agent.identity.name || `Agent ${index + 1}`,
-      meta: agent.activity || agent.task.status,
-    }))
     return shell(React.createElement(React.Fragment, null,
       React.createElement('div', { className: 'panel-title' }, `代理 ${snapshot.runningWorkers}/${snapshot.maxWorkers}`),
       snapshot.agents.length === 0
         ? React.createElement('div', { className: 'empty' }, 'No delegated agents yet.')
         : React.createElement(React.Fragment, null,
-          React.createElement('div', { className: 'sidebar-picker' },
-            React.createElement('div', { className: 'sidebar-label' }, 'Agent'),
-            React.createElement(GlassSelect, {
-              value: selectedAgent?.task.agentId ?? agentOptions[0]?.value ?? '',
-              ariaLabel: 'Agent',
-              onChange: setSelectedAgentId,
-              options: agentOptions,
-            }),
-          ),
-          selectedAgent && React.createElement('div', { className: 'detail-card' },
-            React.createElement('div', { className: 'detail-card-head' },
-              React.createElement('strong', null, selectedAgent.identity.name || selectedAgent.task.agentId),
-              React.createElement('button', {
-                className: 'icon-danger-button',
-                title: '删除代理',
-                onClick: () => void window.microcode.deleteAgent(selectedAgent.task.agentId),
-              }, React.createElement(Trash2, { size: 14 })),
-            ),
-            React.createElement('div', { className: 'detail-kv' },
-              React.createElement('span', null, 'Status'),
-              React.createElement('strong', null, selectedAgent.task.status),
-            ),
-            React.createElement('div', { className: 'detail-kv' },
-              React.createElement('span', null, 'Role'),
-              React.createElement('strong', null, selectedAgent.task.role || 'worker'),
-            ),
-            React.createElement('div', { className: 'detail-kv' },
-              React.createElement('span', null, 'Usage'),
-              React.createElement('strong', null, `${selectedAgent.task.usage.toolCalls} tools · ${selectedAgent.task.usage.tokens} tokens`),
-            ),
-            selectedAgent.activity && React.createElement('p', { className: 'detail-note' }, selectedAgent.activity),
-            React.createElement('div', { className: 'sidebar-label' }, 'Prompt'),
-            React.createElement('pre', { className: 'detail-pre' }, selectedAgent.task.prompt),
-            recentTools.length > 0 && React.createElement(React.Fragment, null,
-              React.createElement('div', { className: 'sidebar-label' }, 'Recent tools'),
-              recentTools.map((tool, index) =>
-                React.createElement('div', { className: cx('tool-mini-row', tool.done && 'done', tool.error && 'error'), key: `${tool.name}-${tool.startedAt ?? index}` },
-                  React.createElement('span', null, tool.name),
-                  React.createElement('small', null, tool.status || tool.detail || (tool.done ? 'done' : 'running')),
+          React.createElement('div', { className: 'accordion-list' },
+            snapshot.agents.map((agent, index) => {
+              const expanded = expandedAgents[agent.task.agentId] ?? index === 0
+              const recentTools = agent.toolHistory.slice(-8)
+              return React.createElement('section', { className: cx('accordion-item', expanded && 'expanded'), key: agent.task.id },
+                React.createElement('button', {
+                  className: 'accordion-trigger',
+                  type: 'button',
+                  'aria-expanded': expanded,
+                  onClick: () => setExpandedAgents((current) => ({ ...current, [agent.task.agentId]: !expanded })),
+                },
+                  expanded ? React.createElement(ChevronDown, { size: 15 }) : React.createElement(ChevronRight, { size: 15 }),
+                  React.createElement('span', { className: cx('status-dot', agent.task.status) }),
+                  React.createElement('span', { className: 'accordion-title' }, agent.task.description || agent.identity.name || agent.identity.id),
+                  React.createElement('small', null, agent.activity || agent.task.status),
                 ),
-              ),
-            ),
+                expanded && React.createElement('div', { className: 'accordion-body detail-card' },
+                  React.createElement('div', { className: 'detail-card-head' },
+                    React.createElement('strong', null, agent.identity.name || agent.task.agentId),
+                    React.createElement('button', {
+                      className: 'icon-danger-button',
+                      title: '删除代理',
+                      onClick: () => void window.microcode.deleteAgent(agent.task.agentId),
+                    }, React.createElement(Trash2, { size: 14 })),
+                  ),
+                  React.createElement('div', { className: 'detail-kv' },
+                    React.createElement('span', null, 'Status'),
+                    React.createElement('strong', null, agent.task.status),
+                  ),
+                  React.createElement('div', { className: 'detail-kv' },
+                    React.createElement('span', null, 'Role'),
+                    React.createElement('strong', null, agent.task.role || 'worker'),
+                  ),
+                  React.createElement('div', { className: 'detail-kv' },
+                    React.createElement('span', null, 'Usage'),
+                    React.createElement('strong', null, `${agent.task.usage.toolCalls} tools · ${agent.task.usage.tokens} tokens`),
+                  ),
+                  agent.activity && React.createElement('p', { className: 'detail-note' }, agent.activity),
+                  React.createElement('div', { className: 'sidebar-label' }, 'Prompt'),
+                  React.createElement('pre', { className: 'detail-pre' }, agent.task.prompt),
+                  recentTools.length > 0 && React.createElement(React.Fragment, null,
+                    React.createElement('div', { className: 'sidebar-label' }, 'Recent tools'),
+                    recentTools.map((tool, toolIndex) =>
+                      React.createElement('div', { className: cx('tool-mini-row', tool.done && 'done', tool.error && 'error'), key: `${tool.name}-${tool.startedAt ?? toolIndex}` },
+                        React.createElement('span', null, tool.name),
+                        React.createElement('small', null, tool.status || tool.detail || (tool.done ? 'done' : 'running')),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            }),
           ),
         ),
     ))
@@ -145,81 +146,63 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   }
 
   if (view === 'tasks') {
-    const selectedList = snapshot.tasks.find((list) => list.id === selectedTaskListId)
-      ?? snapshot.tasks[0]
-    const selectedTask = selectedList?.tasks.find((task) => task.id === selectedTaskId)
-      ?? selectedList?.tasks[0]
-    const taskOptions = selectedList?.tasks.map((task, index) => ({
-      value: task.id,
-      label: task.content || `Task ${index + 1}`,
-      meta: task.completed ? 'done' : task.pending ? 'doing' : 'todo',
-    }))
-      ?? []
-    const stats = selectedList?.stats ?? (selectedList ? {
-      total: selectedList.tasks.length,
-      completed: selectedList.tasks.filter((task) => task.completed).length,
-      inProgress: selectedList.tasks.filter((task) => !task.completed && task.pending).length,
-      remaining: selectedList.tasks.filter((task) => !task.completed && !task.pending).length,
-    } : undefined)
     return shell(React.createElement(React.Fragment, null,
       React.createElement('div', { className: 'panel-title' }, '当前会话任务'),
       snapshot.tasks.length === 0
         ? React.createElement('div', { className: 'empty' }, '当前 session 还没有任务。')
         : React.createElement(React.Fragment, null,
-          React.createElement('div', { className: 'task-list-picker' },
-            snapshot.tasks.map((task) =>
-              React.createElement('button', {
-                className: cx('task-list-row', selectedList?.id === task.id && 'active'),
-                key: task.id,
-                onClick: () => {
-                  setSelectedTaskListId(task.id)
-                  setSelectedTaskId(undefined)
+          React.createElement('div', { className: 'accordion-list' },
+            snapshot.tasks.map((list, index) => {
+              const expanded = expandedTaskLists[list.id] ?? index === 0
+              const stats = list.stats ?? {
+                total: list.tasks.length,
+                completed: list.tasks.filter((task) => task.completed).length,
+                inProgress: list.tasks.filter((task) => !task.completed && task.pending).length,
+                remaining: list.tasks.filter((task) => !task.completed && !task.pending).length,
+              }
+              return React.createElement('section', { className: cx('accordion-item', expanded && 'expanded'), key: list.id },
+                React.createElement('button', {
+                  className: 'accordion-trigger',
+                  type: 'button',
+                  'aria-expanded': expanded,
+                  onClick: () => setExpandedTaskLists((current) => ({ ...current, [list.id]: !expanded })),
                 },
-              },
-                React.createElement(FileText, { size: 15 }),
-                React.createElement('span', null, task.title),
-                React.createElement('small', null, `${task.tasks.filter((item) => item.completed).length}/${task.tasks.length}`),
-              ),
-            ),
-          ),
-          selectedList && React.createElement('div', { className: 'detail-card task-detail-card' },
-            React.createElement('div', { className: 'detail-card-head' },
-              React.createElement(FileText, { size: 15 }),
-              React.createElement('strong', null, selectedList.title),
-            ),
-            stats && React.createElement('div', { className: 'task-stats-grid' },
-              React.createElement('span', null, `total ${stats.total}`),
-              React.createElement('span', null, `done ${stats.completed}`),
-              React.createElement('span', null, `doing ${stats.inProgress}`),
-              React.createElement('span', null, `left ${stats.remaining}`),
-            ),
-            React.createElement('div', { className: 'sidebar-label' }, 'Tasks'),
-            taskOptions.length > 0 && React.createElement(GlassSelect, {
-              value: selectedTask?.id ?? taskOptions[0]?.value ?? '',
-              ariaLabel: 'Task',
-              onChange: setSelectedTaskId,
-              options: taskOptions,
+                  expanded ? React.createElement(ChevronDown, { size: 15 }) : React.createElement(ChevronRight, { size: 15 }),
+                  React.createElement(FileText, { size: 15 }),
+                  React.createElement('span', { className: 'accordion-title' }, list.title),
+                  React.createElement('small', null, `${stats.completed}/${stats.total}`),
+                ),
+                expanded && React.createElement('div', { className: 'accordion-body detail-card task-detail-card' },
+                  React.createElement('div', { className: 'task-stats-grid' },
+                    React.createElement('span', null, `total ${stats.total}`),
+                    React.createElement('span', null, `done ${stats.completed}`),
+                    React.createElement('span', null, `doing ${stats.inProgress}`),
+                    React.createElement('span', null, `left ${stats.remaining}`),
+                  ),
+                  list.tasks.map((item) =>
+                    React.createElement('article', { className: cx('task-detail-row', item.completed && 'completed', item.pending && 'pending'), key: item.id },
+                      React.createElement('div', { className: 'task-detail-top' },
+                        React.createElement('span', { className: cx('task-state-pill', item.completed ? 'done' : item.pending ? 'pending' : 'todo') },
+                          item.completed ? 'done' : item.pending ? 'pending' : 'todo',
+                        ),
+                        React.createElement('label', { className: 'task-reminder-toggle' },
+                          React.createElement('input', {
+                            type: 'checkbox',
+                            checked: item.reminder === true,
+                            disabled: item.completed,
+                            onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+                              void window.microcode.remindTask(list.id, item.id, event.currentTarget.checked),
+                          }),
+                          'priority',
+                        ),
+                      ),
+                      React.createElement('strong', null, item.content),
+                      React.createElement('small', null, `updated ${new Date(item.updatedAt).toLocaleString()}`),
+                    ),
+                  ),
+                ),
+              )
             }),
-            selectedTask && React.createElement('article', { className: cx('task-detail-row', selectedTask.completed && 'completed', selectedTask.pending && 'pending') },
-              React.createElement('div', { className: 'task-detail-top' },
-                React.createElement('span', { className: cx('task-state-pill', selectedTask.completed ? 'done' : selectedTask.pending ? 'pending' : 'todo') },
-                  selectedTask.completed ? 'done' : selectedTask.pending ? 'pending' : 'todo',
-                ),
-                React.createElement('label', { className: 'task-reminder-toggle' },
-                  React.createElement('input', {
-                    type: 'checkbox',
-                    checked: selectedTask.reminder === true,
-                    disabled: selectedTask.completed,
-                    onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
-                      void window.microcode.remindTask(selectedList.id, selectedTask.id, event.currentTarget.checked),
-                  }),
-                  'priority',
-                ),
-              ),
-              React.createElement('strong', null, selectedTask.content),
-              React.createElement('small', null, `created ${new Date(selectedTask.createdAt).toLocaleString()}`),
-              React.createElement('small', null, `updated ${new Date(selectedTask.updatedAt).toLocaleString()}`),
-            ),
           ),
         ),
     ))
