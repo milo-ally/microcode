@@ -3,11 +3,30 @@ import { FilePenLine } from 'lucide-react'
 import { diffLines } from 'diff'
 import { getDetailNumber, getDetailString, MetricRow, OutputBlock, preview, shortPath, ToolFrame } from './helpers.ts'
 import type { ToolRendererProps } from './types.ts'
+import { highlightLineSegments } from '../../../lib/syntaxHighlight.ts'
 
 const INLINE_DIFF_LINES = 12
 const EXPANDED_DIFF_LINES = 120
 
-function compactDiff(oldText: string, newText: string, expanded: boolean): React.ReactNode {
+function languageFromPath(path: string): string {
+  return path.split('.').pop() ?? ''
+}
+
+function renderHighlightedDiffText(text: string, language: string): React.ReactNode[] {
+  const prefix = text.slice(0, 1)
+  const code = text.slice(1)
+  return [
+    React.createElement('span', { className: 'tool-diff-prefix', key: 'prefix' }, prefix),
+    ...highlightLineSegments(code, language).map((segment, index) =>
+      React.createElement('span', {
+        key: `${index}-${segment.text}`,
+        className: segment.className,
+      }, segment.text),
+    ),
+  ]
+}
+
+function compactDiff(oldText: string, newText: string, expanded: boolean, language: string): React.ReactNode {
   if (!oldText && !newText) return null
   const lines: Array<{ kind: 'add' | 'remove' | 'context'; text: string }> = []
   for (const part of diffLines(oldText, newText)) {
@@ -32,7 +51,7 @@ function compactDiff(oldText: string, newText: string, expanded: boolean): React
     React.createElement('pre', { className: 'tool-code-frame' },
       shown.map((line, index) =>
         React.createElement('div', { className: `tool-code-line ${line.kind}`, key: `${index}-${line.text}` },
-          React.createElement('span', { className: 'tool-code-text' }, line.text || ' '),
+          React.createElement('span', { className: 'tool-code-text' }, line.text ? renderHighlightedDiffText(line.text, language) : ' '),
         ),
       ),
       omitted > 0 && React.createElement('div', { className: 'tool-code-omitted', key: 'omitted' },
@@ -48,6 +67,7 @@ export function FileEditToolRenderer({ item, expanded, onToggleExpanded }: ToolR
   const removals = getDetailNumber(item.details, 'removals')
   const replacements = getDetailNumber(item.details, 'replacements')
   const phase = getDetailString(item.details, 'phase')
+  const language = languageFromPath(path)
   const rawOldText = typeof item.args.old_string === 'string' ? item.args.old_string : ''
   const rawNewText = typeof item.args.new_string === 'string' ? item.args.new_string : ''
   const oldText = typeof item.args.old_string === 'string' ? preview(item.args.old_string, 72) : ''
@@ -73,7 +93,7 @@ export function FileEditToolRenderer({ item, expanded, onToggleExpanded }: ToolR
         phase,
       ],
     }),
-    compactDiff(rawOldText, rawNewText, expanded),
+    compactDiff(rawOldText, rawNewText, expanded, language),
     item.status === 'error' && React.createElement(OutputBlock, { item, expanded, onToggleExpanded, label: 'Error' }),
   )
 }

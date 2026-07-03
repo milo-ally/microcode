@@ -1,5 +1,5 @@
-import React from 'react'
-import { FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Search, Server, Settings, Workflow } from 'lucide-react'
+import React, { useState } from 'react'
+import { FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Search, Server, Settings, Trash2, Workflow } from 'lucide-react'
 import { GlassSelect } from '../components/GlassSelect.ts'
 import { ApiConfigPanel } from '../features/settings/ApiConfigPanel.ts'
 import { cx } from '../lib/cx.ts'
@@ -12,6 +12,9 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   setView: (view: View) => void
   onToggleCollapse: () => void
 }) {
+  const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>()
+  const [selectedTaskListId, setSelectedTaskListId] = useState<string | undefined>()
+
   if (!snapshot) {
     return React.createElement('aside', { className: 'sidebar' },
       React.createElement('div', { className: 'sidebar-brand' }, 'Microcode'),
@@ -57,12 +60,20 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   )
 
   if (view === 'agents') {
+    const selectedAgent = snapshot.agents.find((agent) => agent.task.agentId === selectedAgentId)
+      ?? snapshot.agents[0]
+    const recentTools = selectedAgent?.toolHistory.slice(-8) ?? []
     return shell(React.createElement(React.Fragment, null,
       React.createElement('div', { className: 'panel-title' }, `代理 ${snapshot.runningWorkers}/${snapshot.maxWorkers}`),
       snapshot.agents.length === 0
         ? React.createElement('div', { className: 'empty' }, 'No delegated agents yet.')
-        : snapshot.agents.map((agent) =>
-            React.createElement('div', { className: 'side-row', key: agent.task.id },
+        : React.createElement(React.Fragment, null,
+          snapshot.agents.map((agent) =>
+            React.createElement('button', {
+              className: cx('side-row interactive', selectedAgent?.task.agentId === agent.task.agentId && 'active'),
+              key: agent.task.id,
+              onClick: () => setSelectedAgentId(agent.task.agentId),
+            },
               React.createElement('span', { className: cx('status-dot', agent.task.status) }),
               React.createElement('div', { className: 'side-row-main' },
                 React.createElement('strong', null, agent.task.description || agent.identity.name || agent.identity.id),
@@ -70,6 +81,41 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
               ),
             ),
           ),
+          selectedAgent && React.createElement('div', { className: 'detail-card' },
+            React.createElement('div', { className: 'detail-card-head' },
+              React.createElement('strong', null, selectedAgent.identity.name || selectedAgent.task.agentId),
+              React.createElement('button', {
+                className: 'icon-danger-button',
+                title: '删除代理',
+                onClick: () => void window.microcode.deleteAgent(selectedAgent.task.agentId),
+              }, React.createElement(Trash2, { size: 14 })),
+            ),
+            React.createElement('div', { className: 'detail-kv' },
+              React.createElement('span', null, 'Status'),
+              React.createElement('strong', null, selectedAgent.task.status),
+            ),
+            React.createElement('div', { className: 'detail-kv' },
+              React.createElement('span', null, 'Role'),
+              React.createElement('strong', null, selectedAgent.task.role || 'worker'),
+            ),
+            React.createElement('div', { className: 'detail-kv' },
+              React.createElement('span', null, 'Usage'),
+              React.createElement('strong', null, `${selectedAgent.task.usage.toolCalls} tools · ${selectedAgent.task.usage.tokens} tokens`),
+            ),
+            selectedAgent.activity && React.createElement('p', { className: 'detail-note' }, selectedAgent.activity),
+            React.createElement('div', { className: 'sidebar-label' }, 'Prompt'),
+            React.createElement('pre', { className: 'detail-pre' }, selectedAgent.task.prompt),
+            recentTools.length > 0 && React.createElement(React.Fragment, null,
+              React.createElement('div', { className: 'sidebar-label' }, 'Recent tools'),
+              recentTools.map((tool, index) =>
+                React.createElement('div', { className: cx('tool-mini-row', tool.done && 'done', tool.error && 'error'), key: `${tool.name}-${tool.startedAt ?? index}` },
+                  React.createElement('span', null, tool.name),
+                  React.createElement('small', null, tool.status || tool.detail || (tool.done ? 'done' : 'running')),
+                ),
+              ),
+            ),
+          ),
+        ),
     ))
   }
 
@@ -97,31 +143,67 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   }
 
   if (view === 'tasks') {
+    const selectedList = snapshot.tasks.find((list) => list.id === selectedTaskListId)
+      ?? snapshot.tasks[0]
+    const stats = selectedList?.stats ?? (selectedList ? {
+      total: selectedList.tasks.length,
+      completed: selectedList.tasks.filter((task) => task.completed).length,
+      inProgress: selectedList.tasks.filter((task) => !task.completed && task.pending).length,
+      remaining: selectedList.tasks.filter((task) => !task.completed && !task.pending).length,
+    } : undefined)
     return shell(React.createElement(React.Fragment, null,
-      React.createElement('div', { className: 'panel-title' }, 'Tasks'),
+      React.createElement('div', { className: 'panel-title' }, '当前会话任务'),
       snapshot.tasks.length === 0
-        ? React.createElement('div', { className: 'empty' }, 'Task lists will appear here.')
-        : snapshot.tasks.map((task) =>
-            React.createElement('div', { className: 'task-group', key: task.id },
+        ? React.createElement('div', { className: 'empty' }, '当前 session 还没有任务。')
+        : React.createElement(React.Fragment, null,
+          React.createElement('div', { className: 'task-list-picker' },
+            snapshot.tasks.map((task) =>
+              React.createElement('button', {
+                className: cx('task-list-row', selectedList?.id === task.id && 'active'),
+                key: task.id,
+                onClick: () => setSelectedTaskListId(task.id),
+              },
+                React.createElement(FileText, { size: 15 }),
+                React.createElement('span', null, task.title),
+                React.createElement('small', null, `${task.tasks.filter((item) => item.completed).length}/${task.tasks.length}`),
+              ),
+            ),
+          ),
+          selectedList && React.createElement('div', { className: 'detail-card task-detail-card' },
+            React.createElement('div', { className: 'detail-card-head' },
               React.createElement(FileText, { size: 15 }),
-              React.createElement('div', { className: 'side-row-main' },
-                React.createElement('strong', null, task.title),
-                React.createElement('span', null, `${task.tasks.length} items`),
-                task.tasks.map((item) =>
-                  React.createElement('label', { className: cx('task-row', item.completed && 'completed'), key: item.id },
+              React.createElement('strong', null, selectedList.title),
+            ),
+            stats && React.createElement('div', { className: 'task-stats-grid' },
+              React.createElement('span', null, `total ${stats.total}`),
+              React.createElement('span', null, `done ${stats.completed}`),
+              React.createElement('span', null, `doing ${stats.inProgress}`),
+              React.createElement('span', null, `left ${stats.remaining}`),
+            ),
+            React.createElement('div', { className: 'sidebar-label' }, 'Tasks'),
+            selectedList.tasks.map((item) =>
+              React.createElement('article', { className: cx('task-detail-row', item.completed && 'completed', item.pending && 'pending'), key: item.id },
+                React.createElement('div', { className: 'task-detail-top' },
+                  React.createElement('span', { className: cx('task-state-pill', item.completed ? 'done' : item.pending ? 'pending' : 'todo') },
+                    item.completed ? 'done' : item.pending ? 'pending' : 'todo',
+                  ),
+                  React.createElement('label', { className: 'task-reminder-toggle' },
                     React.createElement('input', {
                       type: 'checkbox',
                       checked: item.reminder === true,
                       disabled: item.completed,
                       onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
-                        void window.microcode.remindTask(task.id, item.id, event.currentTarget.checked),
+                        void window.microcode.remindTask(selectedList.id, item.id, event.currentTarget.checked),
                     }),
-                    React.createElement('span', null, item.content),
+                    'priority',
                   ),
                 ),
+                React.createElement('strong', null, item.content),
+                React.createElement('small', null, `updated ${new Date(item.updatedAt).toLocaleString()}`),
               ),
             ),
           ),
+        ),
     ))
   }
 

@@ -204,11 +204,15 @@ export interface GuiApi {
   switchSession(sessionId: string): Promise<void>
   newSession(): Promise<void>
   toggleSkill(skillName: string): Promise<void>
+  deleteAgent(agentId: string): Promise<void>
   remindTask(listId: string, taskId: string, reminder: boolean): Promise<void>
   mcpAction(action: 'enable' | 'disable' | 'reconnect', serverName: string): Promise<void>
   pickImages(): Promise<string[]>
   answerPermission(requestId: string, decision: GuiPermissionDecision): Promise<void>
   answerQuestion(requestId: string, answers: Record<string, string>, block?: boolean): Promise<void>
   listSessions(): Promise<GuiSessionListItem[]>
+  adjustZoom(delta: number): number
+  resetZoom(): number
+  getZoom(): number
   onEvent(listener: (event: GuiIpcEvent) => void): () => void
 }

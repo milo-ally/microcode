@@ -51,9 +51,27 @@ export function App() {
       }])
     })
     const keyHandler = (event: KeyboardEvent) => {
+      if (event.isComposing) return
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
         event.preventDefault()
         setPaletteOpen(true)
+        return
+      }
+      if (event.metaKey || event.ctrlKey) {
+        if (event.key === '+' || event.key === '=') {
+          event.preventDefault()
+          window.microcode.adjustZoom(0.5)
+          return
+        }
+        if (event.key === '-' || event.key === '_') {
+          event.preventDefault()
+          window.microcode.adjustZoom(-0.5)
+          return
+        }
+        if (event.key === '0') {
+          event.preventDefault()
+          window.microcode.resetZoom()
+        }
       }
     }
     window.addEventListener('keydown', keyHandler)

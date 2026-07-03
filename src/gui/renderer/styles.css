@@ -334,6 +334,211 @@ button {
   text-decoration: line-through;
 }
 
+.side-row.interactive,
+.task-list-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.detail-card {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+  border: 1px solid #242834;
+  border-radius: 8px;
+  background: #11141c;
+  padding: 10px;
+}
+
+.detail-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detail-card-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f2f3f7;
+  font-size: 13px;
+}
+
+.icon-danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #4a3030;
+  border-radius: 6px;
+  background: rgba(204, 102, 102, 0.08);
+  color: #dd8a8a;
+  cursor: pointer;
+}
+
+.icon-danger-button:hover {
+  background: rgba(204, 102, 102, 0.18);
+}
+
+.detail-kv {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.detail-kv span,
+.detail-note,
+.tool-mini-row small,
+.task-detail-row small {
+  color: #858b98;
+}
+
+.detail-kv strong {
+  color: #d7dae3;
+}
+
+.detail-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.detail-pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid #242834;
+  border-radius: 6px;
+  background: #0b0d12;
+  color: #cdd1dc;
+  padding: 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.tool-mini-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 5px 7px;
+  font-size: 12px;
+}
+
+.tool-mini-row.done span {
+  color: #b5bd68;
+}
+
+.tool-mini-row.error span {
+  color: #cc6666;
+}
+
+.task-list-picker {
+  display: grid;
+  gap: 4px;
+}
+
+.task-list-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  border-radius: 6px;
+  color: #cdd1dc;
+  padding: 7px 8px;
+}
+
+.task-list-row:hover,
+.task-list-row.active {
+  background: #1d212b;
+}
+
+.task-list-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-list-row small {
+  color: #858b98;
+}
+
+.task-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.task-stats-grid span,
+.task-state-pill {
+  border: 1px solid #2b3140;
+  border-radius: 999px;
+  background: #161a23;
+  color: #b8becb;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+.task-detail-card {
+  gap: 10px;
+}
+
+.task-detail-row {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #242834;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px;
+}
+
+.task-detail-row.completed {
+  opacity: 0.72;
+}
+
+.task-detail-row.completed strong {
+  text-decoration: line-through;
+}
+
+.task-detail-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-state-pill.done {
+  border-color: #2f3e32;
+  color: #b5bd68;
+}
+
+.task-state-pill.pending {
+  border-color: #4a3e25;
+  color: #f0c674;
+}
+
+.task-reminder-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #9fa6b6;
+  font-size: 11px;
+}
+
 .setting-block {
   display: grid;
   gap: 6px;
@@ -523,6 +728,35 @@ button {
 .markdown pre code {
   background: transparent;
   padding: 0;
+}
+
+.syntax-keyword {
+  color: #81a2be;
+}
+
+.syntax-string {
+  color: #b5bd68;
+}
+
+.syntax-number {
+  color: #de935f;
+}
+
+.syntax-comment {
+  color: #6f7787;
+  font-style: italic;
+}
+
+.syntax-property {
+  color: #8abeb7;
+}
+
+.syntax-type {
+  color: #f0c674;
+}
+
+.syntax-punctuation {
+  color: #9fa6b6;
 }
 
 .markdown a {
@@ -755,6 +989,13 @@ button {
 
 .tool-code-text {
   min-width: 0;
+}
+
+.tool-diff-prefix {
+  display: inline-block;
+  width: 1.2ch;
+  color: currentColor;
+  opacity: 0.85;
 }
 
 .tool-code-omitted {

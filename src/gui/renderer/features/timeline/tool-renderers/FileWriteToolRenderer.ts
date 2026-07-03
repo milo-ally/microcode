@@ -2,11 +2,25 @@ import React from 'react'
 import { FileUp } from 'lucide-react'
 import { formatBytes, getDetailNumber, getDetailString, MetricRow, shortPath, ToolFrame } from './helpers.ts'
 import type { ToolRendererProps } from './types.ts'
+import { highlightLineSegments } from '../../../lib/syntaxHighlight.ts'
 
 const INLINE_PREVIEW_LINES = 10
 const EXPANDED_PREVIEW_LINES = 80
 
-function inlineCodePreview(content: string, expanded: boolean): React.ReactNode {
+function languageFromPath(path: string): string {
+  return path.split('.').pop() ?? ''
+}
+
+function renderHighlightedLine(line: string, language: string): React.ReactNode[] {
+  return highlightLineSegments(line, language).map((segment, index) =>
+    React.createElement('span', {
+      key: `${index}-${segment.text}`,
+      className: segment.className,
+    }, segment.text),
+  )
+}
+
+function inlineCodePreview(content: string, expanded: boolean, language: string): React.ReactNode {
   const lines = content.split('\n')
   const limit = expanded ? EXPANDED_PREVIEW_LINES : INLINE_PREVIEW_LINES
   const shown = lines.slice(0, limit)
@@ -22,7 +36,7 @@ function inlineCodePreview(content: string, expanded: boolean): React.ReactNode 
       shown.map((line, index) =>
         React.createElement('div', { className: 'tool-code-line', key: `${index}-${line}` },
           React.createElement('span', { className: 'tool-code-gutter' }, String(index + 1).padStart(gutterWidth, ' ')),
-          React.createElement('span', { className: 'tool-code-text' }, line || ' '),
+          React.createElement('span', { className: 'tool-code-text' }, line ? renderHighlightedLine(line, language) : ' '),
         ),
       ),
       truncated && React.createElement('div', { className: 'tool-code-omitted', key: 'omitted' },
@@ -40,6 +54,7 @@ export function FileWriteToolRenderer({ item, expanded, onToggleExpanded }: Tool
   const removals = getDetailNumber(item.details, 'removals')
   const phase = getDetailString(item.details, 'phase')
   const byteText = formatBytes(item.details?.bytesWritten)
+  const language = languageFromPath(path)
   const summary = [
     phase === 'preparing' ? 'preparing' : phase === 'writing' ? 'writing' : undefined,
     additions !== undefined ? `+${additions}` : undefined,
@@ -65,6 +80,6 @@ export function FileWriteToolRenderer({ item, expanded, onToggleExpanded }: Tool
       ],
     }),
     warning && React.createElement('div', { className: 'tool-warning' }, warning),
-    previewText && inlineCodePreview(previewText, expanded),
+    previewText && inlineCodePreview(previewText, expanded, language),
   )
 }

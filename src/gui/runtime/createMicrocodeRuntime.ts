@@ -775,7 +775,6 @@ export class MicrocodeRuntime {
   async abort(): Promise<void> {
     this.agent.abort()
     await this.supervisor.stopAll()
-    this.addNotice('warning', 'Interrupted.')
     this.emitSnapshot()
   }
 
@@ -784,7 +783,7 @@ export class MicrocodeRuntime {
       ? modelId.split('|') as [string, Api]
       : [modelId, undefined as Api | undefined]
     const snapshot = this.agent.switchModel(id, api)
-    this.addNotice('success', `Model switched to ${snapshot.model.id} (${snapshot.model.api})`)
+    void snapshot
     this.emitSnapshot()
   }
 
@@ -810,21 +809,20 @@ export class MicrocodeRuntime {
     }
 
     const snapshot = this.agent.switchModel(id, api)
+    void snapshot
     saveGuiApiEnv()
-    this.addNotice('success', `Updated API config for ${snapshot.model.id}`)
+    await this.refreshDerivedState()
     this.emitSnapshot()
   }
 
   async setThinkingLevel(level: ThinkingLevel): Promise<void> {
     this.agent.setThinkingLevel(level)
-    this.addNotice('success', `Thinking set to ${level}`)
     this.emitSnapshot()
   }
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.agent.setPermissionMode(mode)
     this.supervisor.syncPermissionsToWorkers(true)
-    this.addNotice('success', `Permission mode set to ${mode}`)
     this.emitSnapshot()
   }
 
@@ -855,18 +853,21 @@ export class MicrocodeRuntime {
   async toggleSkill(skillName: string): Promise<void> {
     if (this.agent.isSkillLoaded(skillName)) {
       this.agent.unloadSkill(skillName)
-      this.addNotice('success', `Unloaded skill: ${skillName}`)
     } else {
       this.agent.loadSkill(skillName)
-      this.addNotice('success', `Loaded skill: ${skillName}`)
     }
+    this.emitSnapshot()
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    await this.supervisor.delete(agentId)
+    await this.refreshDerivedState()
     this.emitSnapshot()
   }
 
   async remindTask(listId: string, taskId: string, reminder: boolean): Promise<void> {
     await this.sessionManager.remindTask(listId, taskId, reminder)
     await this.refreshDerivedState()
-    this.addNotice('success', reminder ? 'Task prioritized.' : 'Task reminder removed.')
     this.emitSnapshot()
   }
 
@@ -875,16 +876,13 @@ export class MicrocodeRuntime {
       if (!this.mcpClient.setServerEnabled(serverName, true)) {
         throw new Error(`MCP server "${serverName}" not found or already connected.`)
       }
-      this.addNotice('info', `Enabling MCP server: ${serverName}`)
     } else if (action === 'disable') {
       if (!this.mcpClient.setServerEnabled(serverName, false)) {
         throw new Error(`MCP server "${serverName}" not found.`)
       }
-      this.addNotice('success', `Disabled MCP server: ${serverName}`)
     } else {
       const ok = await this.mcpClient.reconnectServer(serverName)
       if (!ok) throw new Error(`Failed to reconnect MCP server: ${serverName}`)
-      this.addNotice('success', `Reconnected MCP server: ${serverName}`)
     }
     this.mcpServers = this.mcpClient.getServerStates()
     this.agent.updateMcpServers(this.mcpServers)

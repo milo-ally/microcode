@@ -1,7 +1,15 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type { GuiApi, GuiApiConfigInput, GuiIpcEvent, GuiPermissionDecision, GuiPromptInput } from '../shared/types.ts'
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { PermissionMode } from '../../permissions/index.ts'
+
+let zoomLevel = 0
+
+function setZoomLevel(next: number): number {
+  zoomLevel = Math.max(-4, Math.min(6, Number(next.toFixed(2))))
+  webFrame.setZoomLevel(zoomLevel)
+  return zoomLevel
+}
 
 const api: GuiApi = {
   start: (options) => ipcRenderer.invoke('microcode:start', options),
@@ -16,6 +24,7 @@ const api: GuiApi = {
   switchSession: (sessionId: string) => ipcRenderer.invoke('microcode:switchSession', sessionId),
   newSession: () => ipcRenderer.invoke('microcode:newSession'),
   toggleSkill: (skillName: string) => ipcRenderer.invoke('microcode:toggleSkill', skillName),
+  deleteAgent: (agentId: string) => ipcRenderer.invoke('microcode:deleteAgent', agentId),
   remindTask: (listId: string, taskId: string, reminder: boolean) =>
     ipcRenderer.invoke('microcode:remindTask', listId, taskId, reminder),
   mcpAction: (action: 'enable' | 'disable' | 'reconnect', serverName: string) =>
@@ -26,6 +35,9 @@ const api: GuiApi = {
   answerQuestion: (requestId: string, answers: Record<string, string>, block?: boolean) =>
     ipcRenderer.invoke('microcode:answerQuestion', requestId, answers, block),
   listSessions: () => ipcRenderer.invoke('microcode:listSessions'),
+  adjustZoom: (delta: number) => setZoomLevel(zoomLevel + delta),
+  resetZoom: () => setZoomLevel(0),
+  getZoom: () => zoomLevel,
   onEvent: (listener: (event: GuiIpcEvent) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: GuiIpcEvent) => listener(payload)
     ipcRenderer.on('microcode:event', wrapped)
