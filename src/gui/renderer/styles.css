@@ -580,6 +580,42 @@ button {
   gap: 8px;
 }
 
+.config-paste-panel {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #242834;
+  padding: 12px 0;
+}
+
+.config-paste-panel textarea {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  border: 1px solid #2b3140;
+  border-radius: 8px;
+  background: #0b0d12;
+  color: #d7dae3;
+  padding: 9px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.config-paste-panel textarea:focus {
+  border-color: rgba(138, 190, 183, 0.55);
+  outline: none;
+}
+
+.config-error {
+  border: 1px solid rgba(204, 102, 102, 0.35);
+  border-radius: 6px;
+  background: rgba(204, 102, 102, 0.08);
+  color: #dd8a8a;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 7px 8px;
+}
+
 .task-state-pill.done {
   border-color: #2f3e32;
   color: #b5bd68;

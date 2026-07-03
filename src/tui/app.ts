@@ -36,12 +36,11 @@ import {
 import { existsSync } from 'fs'
 import { isAbsolute, resolve } from 'path'
 import type { McpClientManager } from '../mcp/client.ts'
-import type { McpServerState, McpServerConfig } from '../mcp/types.ts'
+import type { McpServerState } from '../mcp/types.ts'
 import { TOOL_NAME as BASH_TOOL_NAME } from '../tools/BashTool/BashTool.ts'
 import { TOOL_NAME as READ_TOOL_NAME } from '../tools/FileReadTool/FileReadTool.ts'
 import { TOOL_NAME as WRITE_TOOL_NAME } from '../tools/FileWriteTool/FileWriteTool.ts'
 import { TOOL_NAME as EDIT_TOOL_NAME } from '../tools/FileEditTool/FileEditTool.ts'
-import { addMcpServer, removeMcpServer } from '../mcp/configWrite.ts'
 import { SessionManager } from '../session/SessionManager.ts'
 import type { MicrocodeAgent, MicrocodeAgentEvent } from '../agent/index.ts'
 import type { Skill } from '../skill/skill.ts'
@@ -1615,182 +1614,54 @@ export class App {
       return
     }
 
-    const parts = args.trim().split(/\s+/)
-    const action = parts[0]?.toLowerCase()
-    const serverName = parts[1]
+    void args
 
-    // /mcp with no args — show status
-    if (!action) {
-      const states = this.mcpClient.getServerStates()
-      if (states.length === 0) {
-        this.chatContainer.addChild(
-          new Text(theme.dim('No MCP servers configured.'), 1, 0),
-        )
-        this.chatContainer.addChild(new Spacer(1))
-        this.ui.requestRender()
-        return
-      }
-
+    const states = this.mcpClient.getServerStates()
+    if (states.length === 0) {
       this.chatContainer.addChild(
-        new Text(theme.fg('accent', 'MCP Servers:'), 1, 0),
+        new Text(theme.dim('No MCP servers configured.'), 1, 0),
       )
-      this.chatContainer.addChild(new Spacer(1))
-
-      for (const state of states) {
-        const statusIcon = state.status === 'connected' ? '✓'
-          : state.status === 'failed' ? '✗'
-          : state.status === 'disabled' ? '○'
-          : '◌'
-        const statusLine = `${statusIcon} ${theme.bold(state.name)} ${theme.dim(`(${state.status})`)}`
-        this.chatContainer.addChild(new Text(statusLine, 1, 0))
-
-        if (state.status === 'connected' && state.tools.length > 0) {
-          const toolNames = state.tools.map(t => t.name).join(', ')
-          this.chatContainer.addChild(
-            new Text(`  ${theme.dim('Tools:')} ${toolNames}`, 1, 0),
-          )
-        }
-
-        if (state.status === 'connected' && state.resources.length > 0) {
-          const resourceNames = state.resources.map(r => r.name).join(', ')
-          this.chatContainer.addChild(
-            new Text(`  ${theme.dim('Resources:')} ${resourceNames}`, 1, 0),
-          )
-        }
-
-        if (state.status === 'failed' && state.error) {
-          this.chatContainer.addChild(
-            new Text(`  ${chalk.hex('#cc6666')(state.error)}`, 1, 0),
-          )
-        }
-      }
-
       this.chatContainer.addChild(new Spacer(1))
       this.ui.requestRender()
       return
     }
 
-    // /mcp enable <name>
-    if (action === 'enable') {
-      if (!serverName) {
-        this.showError('Usage: /mcp enable <server-name>')
-        return
+    this.chatContainer.addChild(
+      new Text(theme.fg('accent', 'MCP Servers:'), 1, 0),
+    )
+    this.chatContainer.addChild(new Spacer(1))
+
+    for (const state of states) {
+      const statusIcon = state.status === 'connected' ? '✓'
+        : state.status === 'failed' ? '✗'
+        : state.status === 'disabled' ? '○'
+        : '◌'
+      const statusLine = `${statusIcon} ${theme.bold(state.name)} ${theme.dim(`(${state.status})`)}`
+      this.chatContainer.addChild(new Text(statusLine, 1, 0))
+
+      if (state.status === 'connected' && state.tools.length > 0) {
+        const toolNames = state.tools.map(t => t.name).join(', ')
+        this.chatContainer.addChild(
+          new Text(`  ${theme.dim('Tools:')} ${toolNames}`, 1, 0),
+        )
       }
-      const result = this.mcpClient.setServerEnabled(serverName, true)
-      if (result) {
-        this.showStatus(`Enabling MCP server: ${serverName}...`)
-      } else {
-        this.showError(`MCP server "${serverName}" not found or already connected.`)
+
+      if (state.status === 'connected' && state.resources.length > 0) {
+        const resourceNames = state.resources.map(r => r.name).join(', ')
+        this.chatContainer.addChild(
+          new Text(`  ${theme.dim('Resources:')} ${resourceNames}`, 1, 0),
+        )
       }
-      return
-    }
 
-    // /mcp disable <name>
-    if (action === 'disable') {
-      if (!serverName) {
-        this.showError('Usage: /mcp disable <server-name>')
-        return
+      if (state.status === 'failed' && state.error) {
+        this.chatContainer.addChild(
+          new Text(`  ${chalk.hex('#cc6666')(state.error)}`, 1, 0),
+        )
       }
-      const result = this.mcpClient.setServerEnabled(serverName, false)
-      if (result) {
-        this.showStatus(`Disabled MCP server: ${serverName}`)
-      } else {
-        this.showError(`MCP server "${serverName}" not found.`)
-      }
-      return
     }
 
-    // /mcp reconnect <name>
-    if (action === 'reconnect') {
-      if (!serverName) {
-        this.showError('Usage: /mcp reconnect <server-name>')
-        return
-      }
-      this.showStatus(`Reconnecting MCP server: ${serverName}...`)
-      this.mcpClient.reconnectServer(serverName).then((success) => {
-        if (success) {
-          this.showStatus(`Reconnected MCP server: ${serverName}`)
-        } else {
-          this.showError(`Failed to reconnect MCP server: ${serverName}`)
-        }
-      })
-      return
-    }
-
-    // /mcp add <name> <command> [args...]
-    if (action === 'add') {
-      this.handleMcpAddCommand(args.trim())
-      return
-    }
-
-    // /mcp remove <name>
-    if (action === 'remove') {
-      if (!serverName) {
-        this.showError('Usage: /mcp remove <server-name>')
-        return
-      }
-      this.handleMcpRemoveCommand(serverName)
-      return
-    }
-
-    this.showError(`Unknown /mcp action: ${action}. Use /mcp to show servers.`)
-  }
-
-  private async handleMcpAddCommand(argsStr: string): Promise<void> {
-    const parts = argsStr.split(/\s+/).filter(Boolean)
-    // Skip 'add' prefix if present
-    const name = parts[0]
-    const command = parts[1]
-    const cmdArgs = parts.slice(2)
-
-    if (!name || !command) {
-      this.showError('Usage: /mcp add <name> <command> [args...]')
-      return
-    }
-
-    const serverConfig: McpServerConfig = {
-      type: 'stdio',
-      command,
-      args: cmdArgs,
-    }
-
-    try {
-      const configPath = await addMcpServer(name, serverConfig, 'project', process.cwd())
-      this.showStatus(`Added MCP server "${name}" to ${configPath}`)
-
-      // Connect the new server immediately
-      if (this.mcpClient) {
-        this.showStatus(`Connecting MCP server: ${name}...`)
-        await this.mcpClient.connectServer(name, serverConfig)
-        const server = this.mcpClient.getServer(name)
-        if (server?.status === 'connected') {
-          this.showStatus(`MCP server "${name}" connected with ${server.tools.length} tool(s)`)
-
-          this.agent.configureMcpTools(this.mcpClient)
-
-          // Rebuild system prompt with updated MCP info and deferred tool names
-          this.rebuildSystemPrompt(this.mcpClient.getServerStates())
-        } else {
-          this.showError(`Failed to connect MCP server "${name}": ${server?.error ?? 'unknown error'}`)
-        }
-      }
-    } catch (error) {
-      this.showError(`Failed to add MCP server: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  private async handleMcpRemoveCommand(name: string): Promise<void> {
-    try {
-      await removeMcpServer(name, 'project', process.cwd())
-      this.showStatus(`Removed MCP server "${name}" from config`)
-
-      // Disconnect if connected
-      if (this.mcpClient) {
-        this.mcpClient.setServerEnabled(name, false)
-      }
-    } catch (error) {
-      this.showError(`Failed to remove MCP server: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    this.chatContainer.addChild(new Spacer(1))
+    this.ui.requestRender()
   }
 
   private rebuildSystemPrompt(mcpServers?: McpServerState[]): void {
