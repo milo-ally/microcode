@@ -46,9 +46,11 @@ import {
 import type {
   GuiChatItem,
   GuiCommandItem,
+  GuiCompactionItem,
   GuiIpcEvent,
   GuiApiConfigInput,
   GuiModelListItem,
+  GuiModelTokenUsage,
   GuiMessageBlock,
   GuiPermissionDecision,
   GuiPermissionRequest,
@@ -426,6 +428,7 @@ export class MicrocodeRuntime {
   private pendingAssistantMessageId?: string
   private pendingTools = new Map<string, GuiToolItem>()
   private lastToolUpdateAt = new Map<string, number>()
+  private activeCompactionItemId?: string
   private completionTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private streamingToolAliases = new Map<string, string>()
   private pendingPermissions = new Map<string, PendingPermission>()
@@ -581,6 +584,7 @@ export class MicrocodeRuntime {
       models: this.getModelList(),
       skills: this.getSkillList(),
       config: this.getConfigSummary(),
+      tokenUsageByModel: this.getTokenUsageByModel(),
     }
   }
 
@@ -967,6 +971,28 @@ export class MicrocodeRuntime {
     })
   }
 
+  private getTokenUsageByModel(): GuiModelTokenUsage[] {
+    const merged = new Map<string, GuiModelTokenUsage>()
+    for (const agent of this.supervisor.registry.list()) {
+      const stats = agent.getTokenStats()
+      for (const [key, usage] of Object.entries(stats.byModel)) {
+        const previous = merged.get(key)
+        if (previous) {
+          previous.requests += usage.requests
+          previous.inputTokens += usage.inputTokens
+          previous.outputTokens += usage.outputTokens
+          previous.cacheReadTokens += usage.cacheReadTokens
+          previous.cacheWriteTokens += usage.cacheWriteTokens
+          previous.totalTokens += usage.totalTokens
+          previous.totalCost += usage.totalCost
+        } else {
+          merged.set(key, { ...usage })
+        }
+      }
+    }
+    return [...merged.values()].sort((a, b) => b.totalTokens - a.totalTokens)
+  }
+
   private getApiKeyEnv(model: Model<Api>): string {
     const customEnv = (model as any).apiKeyEnv as string | undefined
     if (customEnv) return customEnv
@@ -1154,7 +1180,7 @@ export class MicrocodeRuntime {
         }
         break
       case 'compaction_changed':
-        this.addNotice(event.progress.phase === 'done' ? 'success' : 'info', event.progress.message)
+        this.upsertCompaction(event.progress)
         break
       case 'state_changed':
       case 'token_usage':
@@ -1477,6 +1503,49 @@ export class MicrocodeRuntime {
     }
     this.timeline.push(item)
     this.emit({ type: 'notice', item })
+    this.emitTimeline()
+  }
+
+  private upsertCompaction(progress: Extract<MicrocodeAgentEvent, { type: 'compaction_changed' }>['progress']): void {
+    const now = Date.now()
+    let id = this.activeCompactionItemId
+    let item = id
+      ? this.timeline.find((entry): entry is GuiCompactionItem => entry.id === id && entry.kind === 'compaction')
+      : undefined
+
+    if (!item) {
+      id = makeId('compaction')
+      this.activeCompactionItemId = id
+      item = {
+        id,
+        kind: 'compaction',
+        phase: progress.phase,
+        message: progress.message,
+        progress: Math.max(0, Math.min(100, progress.progress ?? 0)),
+        tokensBefore: progress.tokensBefore,
+        tokensAfter: progress.tokensAfter,
+        elapsedMs: progress.elapsedMs,
+        processedUnits: progress.processedUnits,
+        totalUnits: progress.totalUnits,
+        createdAt: now,
+        updatedAt: now,
+      }
+      this.timeline.push(item)
+    } else {
+      item.phase = progress.phase
+      item.message = progress.message
+      item.progress = Math.max(0, Math.min(100, progress.progress ?? item.progress))
+      item.tokensBefore = progress.tokensBefore
+      item.tokensAfter = progress.tokensAfter
+      item.elapsedMs = progress.elapsedMs
+      item.processedUnits = progress.processedUnits
+      item.totalUnits = progress.totalUnits
+      item.updatedAt = now
+    }
+
+    if (progress.phase === 'done') {
+      this.activeCompactionItemId = undefined
+    }
     this.emitTimeline()
   }
 

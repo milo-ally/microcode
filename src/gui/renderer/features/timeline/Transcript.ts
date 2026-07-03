@@ -4,7 +4,7 @@ import { ToolItem } from './ToolItem.ts'
 import { CommandResult } from './CommandResult.ts'
 import { PermissionItem } from './PermissionItem.ts'
 import { NoticeItem } from './NoticeItem.ts'
-import { AgentActivityPanel } from './AgentActivityPanel.ts'
+import { CompactionItem } from './CompactionItem.ts'
 import type { GuiChatItem, GuiRuntimeSnapshot } from '../../../shared/types.ts'
 
 export function Transcript({ timeline, snapshot }: { timeline: GuiChatItem[]; snapshot?: GuiRuntimeSnapshot }) {
@@ -43,9 +43,9 @@ export function Transcript({ timeline, snapshot }: { timeline: GuiChatItem[]; sn
       if (item.kind === 'tool') return React.createElement(ToolItem, { key: item.id, item })
       if (item.kind === 'command') return React.createElement(CommandResult, { key: item.id, item, snapshot })
       if (item.kind === 'permission') return React.createElement(PermissionItem, { key: item.id, item, snapshot })
+      if (item.kind === 'compaction') return React.createElement(CompactionItem, { key: item.id, item })
       return React.createElement(NoticeItem, { key: item.id, item })
     }),
-    React.createElement(AgentActivityPanel, { snapshot }),
     React.createElement('div', { ref: endRef }),
   )
 }

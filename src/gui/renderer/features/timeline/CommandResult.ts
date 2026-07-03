@@ -11,11 +11,23 @@ function MetricTile({ label, value, accent }: { label: string; value: React.Reac
   )
 }
 
+function formatTokens(value: number): string {
+  return value.toLocaleString('en-US')
+}
+
+function formatPrice(value: number): string {
+  if (value === 0) return '$0'
+  if (value < 0.0001) return `$${value.toFixed(6)}`
+  return `$${value.toFixed(4)}`
+}
+
 export function CommandResult({ item, snapshot }: { item: GuiCommandItem; snapshot?: GuiRuntimeSnapshot }) {
   const renderBody = () => {
     if (!snapshot) return React.createElement('div', { className: 'empty' }, 'Runtime snapshot is loading.')
 
     if (item.command === '/status') {
+      const context = snapshot.agent.tokens.context
+      const session = snapshot.agent.tokens.session
       return React.createElement(React.Fragment, null,
         React.createElement('div', { className: 'command-metrics-grid' },
           React.createElement(MetricTile, { label: 'Model', value: snapshot.agent.model.id, accent: true }),
@@ -23,7 +35,49 @@ export function CommandResult({ item, snapshot }: { item: GuiCommandItem; snapsh
           React.createElement(MetricTile, { label: 'Permission', value: snapshot.agent.permission.mode }),
           React.createElement(MetricTile, { label: 'Context', value: `${snapshot.agent.tokens.context.percentUsed}%` }),
           React.createElement(MetricTile, { label: 'Messages', value: snapshot.agent.messageCount }),
+          React.createElement(MetricTile, { label: 'Session tokens', value: formatTokens(session.totalTokens) }),
           React.createElement(MetricTile, { label: 'Workers', value: `${snapshot.runningWorkers}/${snapshot.maxWorkers}` }),
+        ),
+        React.createElement('div', { className: 'command-token-panel' },
+          React.createElement('div', { className: 'command-token-head' },
+            React.createElement('strong', null, 'Context window'),
+            React.createElement('span', null, `${context.percentUsed}% used`),
+          ),
+          React.createElement('div', { className: 'command-token-bar' },
+            React.createElement('span', { style: { width: `${Math.min(100, Math.max(0, context.percentUsed))}%` } }),
+          ),
+          React.createElement('div', { className: 'command-token-grid' },
+            React.createElement('span', null, 'Used'),
+            React.createElement('strong', null, `${formatTokens(context.usedTokens)} / ${formatTokens(context.contextWindow)}`),
+            React.createElement('span', null, 'Remaining'),
+            React.createElement('strong', null, `${formatTokens(context.remainingTokens)} (${context.percentRemaining}%)`),
+            React.createElement('span', null, 'Breakdown'),
+            React.createElement('strong', null, `system ${formatTokens(context.systemPromptTokens)} + messages ${formatTokens(context.messageTokens)}`),
+          ),
+        ),
+        React.createElement('div', { className: 'command-token-panel' },
+          React.createElement('div', { className: 'command-token-head' },
+            React.createElement('strong', null, 'Usage by model'),
+            React.createElement('span', null, `${snapshot.tokenUsageByModel.length} models`),
+          ),
+          snapshot.tokenUsageByModel.length === 0
+            ? React.createElement('div', { className: 'command-empty-state' }, 'No model token usage recorded yet.')
+            : React.createElement('div', { className: 'command-model-usage-list' },
+                snapshot.tokenUsageByModel.map((usage) =>
+                  React.createElement('div', { className: 'command-model-usage-row', key: usage.key },
+                    React.createElement('div', null,
+                      React.createElement('strong', null, usage.modelId),
+                      React.createElement('span', null, `${usage.provider} · ${usage.api}`),
+                    ),
+                    React.createElement('div', null,
+                      React.createElement('strong', null, `${formatTokens(usage.requests)} req · ${formatTokens(usage.totalTokens)} tok`),
+                      React.createElement('span', null,
+                        `in ${formatTokens(usage.inputTokens)} · out ${formatTokens(usage.outputTokens)} · cache ${formatTokens(usage.cacheReadTokens + usage.cacheWriteTokens)} · ${formatPrice(usage.totalCost)}`,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
         ),
         React.createElement('div', { className: 'command-path-row' },
           React.createElement('span', null, 'cwd'),

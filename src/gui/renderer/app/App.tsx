@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   GitBranch,
   MessageSquare,
@@ -13,6 +13,7 @@ import { ActivityButton } from '../components/ActivityButton.ts'
 import { ErrorBoundary } from '../components/ErrorBoundary.ts'
 import { CommandPalette } from '../features/command-palette/CommandPalette.ts'
 import { Composer } from '../features/composer/Composer.ts'
+import { AgentActivityPanel } from '../features/timeline/AgentActivityPanel.ts'
 import { Transcript } from '../features/timeline/Transcript.ts'
 import { Sidebar } from '../layout/Sidebar.ts'
 import { StatusBar } from '../layout/StatusBar.ts'
@@ -48,12 +49,14 @@ export function App() {
   const [startupError, setStartupError] = useState<string | undefined>()
   const [workspaceBusy, setWorkspaceBusy] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [agentDrawerCollapsed, setAgentDrawerCollapsed] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarResizing, setSidebarResizing] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY))
     return Number.isFinite(saved) && saved > 0 ? clampSidebarWidth(saved) : DEFAULT_SIDEBAR_WIDTH
   })
+  const previousAgentCountsRef = useRef({ agents: 0, running: 0 })
 
   useEffect(() => {
     const refreshWorkspaces = () => {
@@ -147,6 +150,18 @@ export function App() {
   }, [sidebarWidth])
 
   useEffect(() => {
+    const next = {
+      agents: snapshot?.agents.length ?? 0,
+      running: snapshot?.runningWorkers ?? 0,
+    }
+    const previous = previousAgentCountsRef.current
+    if (next.agents > previous.agents || next.running > previous.running) {
+      setAgentDrawerCollapsed(false)
+    }
+    previousAgentCountsRef.current = next
+  }, [snapshot?.agents.length, snapshot?.runningWorkers])
+
+  useEffect(() => {
     if (!sidebarResizing) return
     const move = (event: PointerEvent) => setSidebarWidth(clampSidebarWidth(event.clientX))
     const stop = () => setSidebarResizing(false)
@@ -161,6 +176,7 @@ export function App() {
   }, [sidebarResizing])
 
   const shellStyle = { '--sidebar-width': `${sidebarWidth}px` } as CSSProperties
+  const hasAgents = Boolean(snapshot?.agents.length)
 
   return React.createElement('div', {
     className: cx('app-shell', sidebarCollapsed && 'sidebar-collapsed', sidebarResizing && 'sidebar-resizing'),
@@ -203,7 +219,14 @@ export function App() {
         setSidebarResizing(true)
       },
     }),
-    React.createElement('section', { className: cx('workbench', timeline.length === 0 && 'empty-state') },
+    React.createElement('section', {
+      className: cx(
+        'workbench',
+        timeline.length === 0 && 'empty-state',
+        hasAgents && !agentDrawerCollapsed && 'agents-open',
+        hasAgents && agentDrawerCollapsed && 'agents-collapsed',
+      ),
+    },
       sidebarCollapsed && React.createElement('button', {
         className: 'sidebar-restore',
         title: '展开侧边栏',
@@ -239,6 +262,11 @@ export function App() {
               ),
             ),
       ),
+      snapshot && React.createElement(AgentActivityPanel, {
+        snapshot,
+        collapsed: agentDrawerCollapsed,
+        onToggleCollapsed: () => setAgentDrawerCollapsed((value) => !value),
+      }),
       snapshot && React.createElement(Composer, { busy: Boolean(snapshot.busy), snapshot }),
       React.createElement(StatusBar, { snapshot }),
     ),

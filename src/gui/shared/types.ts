@@ -63,6 +63,28 @@ export interface GuiNoticeItem {
   createdAt: number
 }
 
+export interface GuiCompactionItem {
+  id: string
+  kind: 'compaction'
+  phase:
+    | 'microcompact'
+    | 'analyzing'
+    | 'summarizing'
+    | 'validating'
+    | 'persisting'
+    | 'committing'
+    | 'done'
+  message: string
+  progress: number
+  tokensBefore?: number
+  tokensAfter?: number
+  elapsedMs?: number
+  processedUnits?: number
+  totalUnits?: number
+  createdAt: number
+  updatedAt: number
+}
+
 export interface GuiCommandItem {
   id: string
   kind: 'command'
@@ -87,6 +109,7 @@ export type GuiChatItem =
   | GuiMessageItem
   | GuiToolItem
   | GuiNoticeItem
+  | GuiCompactionItem
   | GuiCommandItem
   | GuiPermissionItem
 
@@ -134,6 +157,7 @@ export interface GuiRuntimeSnapshot {
   models: GuiModelListItem[]
   skills: GuiSkillListItem[]
   config: GuiConfigSummary
+  tokenUsageByModel: GuiModelTokenUsage[]
 }
 
 export interface GuiSessionListItem {
@@ -147,6 +171,20 @@ export interface GuiSessionListItem {
 export interface GuiWorkspaceItem {
   path: string
   lastOpenedAt: number
+}
+
+export interface GuiModelTokenUsage {
+  key: string
+  modelId: string
+  provider: string
+  api: Api
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  totalTokens: number
+  totalCost: number
 }
 
 export interface GuiModelListItem {

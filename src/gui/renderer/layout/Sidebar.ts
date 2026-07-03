@@ -10,6 +10,75 @@ function workspaceLabel(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
 }
 
+function formatTokens(value: number): string {
+  return value.toLocaleString('en-US')
+}
+
+function formatPrice(value: number): string {
+  if (value === 0) return '$0'
+  if (value < 0.0001) return `$${value.toFixed(6)}`
+  return `$${value.toFixed(4)}`
+}
+
+function SettingsSection({
+  id,
+  title,
+  meta,
+  defaultOpen = false,
+  children,
+}: {
+  id: string
+  title: string
+  meta?: string
+  defaultOpen?: boolean
+  children?: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return React.createElement('section', { className: cx('settings-section', open && 'open') },
+    React.createElement('button', {
+      className: 'settings-section-trigger',
+      type: 'button',
+      'aria-expanded': open,
+      'aria-controls': `settings-section-${id}`,
+      onClick: () => setOpen((value) => !value),
+    },
+      open ? React.createElement(ChevronDown, { size: 15 }) : React.createElement(ChevronRight, { size: 15 }),
+      React.createElement('span', null, title),
+      meta && React.createElement('small', null, meta),
+    ),
+    open && React.createElement('div', { className: 'settings-section-body', id: `settings-section-${id}` }, children),
+  )
+}
+
+function TokenUsagePanel({ snapshot }: { snapshot: GuiRuntimeSnapshot }) {
+  const current = snapshot.agent.tokens.currentModel
+  const session = snapshot.agent.tokens.session
+  const context = snapshot.agent.tokens.context
+  return React.createElement('div', { className: 'settings-token-panel' },
+    React.createElement('div', { className: 'settings-token-current' },
+      React.createElement('strong', null, current.modelId),
+      React.createElement('span', null, `${current.provider} · ${current.api}`),
+    ),
+    React.createElement('div', { className: 'settings-token-bar' },
+      React.createElement('span', { style: { width: `${Math.min(100, Math.max(0, context.percentUsed))}%` } }),
+    ),
+    React.createElement('div', { className: 'settings-token-grid' },
+      React.createElement('span', null, 'Current model'),
+      React.createElement('strong', null, `${formatTokens(current.totalTokens)} tok · ${formatTokens(current.requests)} req`),
+      React.createElement('span', null, 'Input / output'),
+      React.createElement('strong', null, `${formatTokens(current.inputTokens)} / ${formatTokens(current.outputTokens)}`),
+      React.createElement('span', null, 'Cache'),
+      React.createElement('strong', null, formatTokens(current.cacheReadTokens + current.cacheWriteTokens)),
+      React.createElement('span', null, 'Cost'),
+      React.createElement('strong', null, formatPrice(current.totalCost)),
+      React.createElement('span', null, 'Session total'),
+      React.createElement('strong', null, `${formatTokens(session.totalTokens)} tok · ${formatTokens(session.requests)} req`),
+      React.createElement('span', null, 'Context'),
+      React.createElement('strong', null, `${context.percentUsed}% · ${formatTokens(context.usedTokens)}/${formatTokens(context.contextWindow)}`),
+    ),
+  )
+}
+
 export function Sidebar({
   view,
   snapshot,
@@ -333,6 +402,9 @@ export function Sidebar({
   }
 
   if (view === 'settings') {
+    const envEntries = Object.entries(snapshot.config.modelEnv)
+    const configuredEnvCount = envEntries.filter(([, present]) => present).length
+    const currentModelUsage = snapshot.agent.tokens.currentModel
     const submitModelConfig = () => {
       setConfigError(undefined)
       setConfigSuccess(undefined)
@@ -346,73 +418,106 @@ export function Sidebar({
     }
     return shell(React.createElement(React.Fragment, null,
       React.createElement('div', { className: 'panel-title' }, '模型与设置'),
-      React.createElement('div', { className: 'setting-block' },
-        React.createElement('label', null, 'Model'),
-        React.createElement(GlassSelect, {
-          value: `${snapshot.agent.model.id}|${snapshot.agent.model.api}`,
-          ariaLabel: 'Model',
-          onChange: (nextValue) => void window.microcode.setModel(nextValue),
-          options: snapshot.models.map((model) => ({
-            value: `${model.id}|${model.api}`,
-            label: model.name,
-            meta: `${model.provider} · ${model.api}${model.apiKeyConfigured ? '' : ' · no key'}`,
-            missing: !model.apiKeyConfigured,
-          })),
-        }),
+      React.createElement(SettingsSection, {
+        id: 'runtime',
+        title: '运行设置',
+        meta: snapshot.agent.model.name,
+        defaultOpen: true,
+      },
+        React.createElement('div', { className: 'setting-block' },
+          React.createElement('label', null, 'Model'),
+          React.createElement(GlassSelect, {
+            value: `${snapshot.agent.model.id}|${snapshot.agent.model.api}`,
+            ariaLabel: 'Model',
+            onChange: (nextValue) => void window.microcode.setModel(nextValue),
+            options: snapshot.models.map((model) => ({
+              value: `${model.id}|${model.api}`,
+              label: model.name,
+              meta: `${model.provider} · ${model.api}${model.apiKeyConfigured ? '' : ' · no key'}`,
+              missing: !model.apiKeyConfigured,
+            })),
+          }),
+        ),
+        React.createElement('div', { className: 'setting-block' },
+          React.createElement('label', null, 'Permission'),
+          React.createElement(GlassSelect, {
+            value: snapshot.agent.permission.mode,
+            ariaLabel: 'Permission',
+            onChange: (nextValue) => void window.microcode.setPermissionMode(nextValue as any),
+            options: ['interactive', 'auto-approve', 'plan'].map((mode) => ({
+              value: mode,
+              label: mode,
+            })),
+          }),
+        ),
+        React.createElement('div', { className: 'setting-block' },
+          React.createElement('label', null, 'Thinking'),
+          React.createElement(GlassSelect, {
+            value: snapshot.agent.thinkingLevel,
+            ariaLabel: 'Thinking',
+            onChange: (nextValue) => void window.microcode.setThinkingLevel(nextValue as any),
+            options: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].map((level) => ({
+              value: level,
+              label: level,
+            })),
+          }),
+        ),
       ),
-      React.createElement('div', { className: 'setting-block' },
-        React.createElement('label', null, 'Permission'),
-        React.createElement(GlassSelect, {
-          value: snapshot.agent.permission.mode,
-          ariaLabel: 'Permission',
-          onChange: (nextValue) => void window.microcode.setPermissionMode(nextValue as any),
-          options: ['interactive', 'auto-approve', 'plan'].map((mode) => ({
-            value: mode,
-            label: mode,
-          })),
-        }),
+      React.createElement(SettingsSection, {
+        id: 'token-usage',
+        title: 'Token 用量',
+        meta: `${formatTokens(currentModelUsage.totalTokens)} tok`,
+        defaultOpen: true,
+      },
+        React.createElement(TokenUsagePanel, { snapshot }),
       ),
-      React.createElement('div', { className: 'setting-block' },
-        React.createElement('label', null, 'Thinking'),
-        React.createElement(GlassSelect, {
-          value: snapshot.agent.thinkingLevel,
-          ariaLabel: 'Thinking',
-          onChange: (nextValue) => void window.microcode.setThinkingLevel(nextValue as any),
-          options: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].map((level) => ({
-            value: level,
-            label: level,
-          })),
-        }),
+      React.createElement(SettingsSection, {
+        id: 'api-config',
+        title: 'API 配置',
+        meta: `${configuredEnvCount}/${envEntries.length} set`,
+        defaultOpen: true,
+      },
+        React.createElement(ApiConfigPanel, { snapshot }),
       ),
-      React.createElement(ApiConfigPanel, { snapshot }),
-      React.createElement('div', { className: 'config-paste-panel' },
-        React.createElement('div', { className: 'sidebar-label' }, 'Add custom model'),
-        React.createElement('textarea', {
-          placeholder: '{\n  "models": [{\n    "id": "my-model",\n    "name": "My Model",\n    "api": "openai-completions",\n    "baseUrl": "https://api.example.com/v1",\n    "contextWindow": 128000,\n    "maxTokens": 4096\n  }]\n}',
-          value: modelConfigText,
-          onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setModelConfigText(event.currentTarget.value),
-        }),
-        configError && React.createElement('div', { className: 'config-error' }, configError),
-        configSuccess && React.createElement('div', { className: 'config-success' }, configSuccess),
-        React.createElement('button', {
-          className: 'wide-action',
-          disabled: configBusy !== null || !modelConfigText.trim(),
-          onClick: submitModelConfig,
-        }, React.createElement(Plus, { size: 14 }), configBusy === 'model' ? 'Adding...' : 'Add model'),
+      React.createElement(SettingsSection, {
+        id: 'custom-model',
+        title: '自定义模型',
+        meta: 'JSON',
+      },
+        React.createElement('div', { className: 'config-paste-panel' },
+          React.createElement('textarea', {
+            placeholder: '{\n  "models": [{\n    "id": "my-model",\n    "name": "My Model",\n    "api": "openai-completions",\n    "baseUrl": "https://api.example.com/v1",\n    "contextWindow": 128000,\n    "maxTokens": 4096\n  }]\n}',
+            value: modelConfigText,
+            onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setModelConfigText(event.currentTarget.value),
+          }),
+          configError && React.createElement('div', { className: 'config-error' }, configError),
+          configSuccess && React.createElement('div', { className: 'config-success' }, configSuccess),
+          React.createElement('button', {
+            className: 'wide-action',
+            disabled: configBusy !== null || !modelConfigText.trim(),
+            onClick: submitModelConfig,
+          }, React.createElement(Plus, { size: 14 }), configBusy === 'model' ? 'Adding...' : 'Add model'),
+        ),
       ),
-      React.createElement('div', { className: 'sidebar-section' },
-        React.createElement('div', { className: 'sidebar-label' }, 'API Configuration'),
+      React.createElement(SettingsSection, {
+        id: 'config-status',
+        title: '配置状态',
+        meta: `${configuredEnvCount}/${envEntries.length}`,
+      },
         React.createElement('div', { className: 'config-path' }, snapshot.config.userConfigPath),
         React.createElement('div', { className: 'config-path' }, snapshot.config.projectConfigPath),
-        Object.entries(snapshot.config.modelEnv).map(([key, present]) =>
+        envEntries.map(([key, present]) =>
           React.createElement('div', { className: 'kv', key },
             React.createElement('span', null, key),
             React.createElement('strong', { className: present ? 'ok' : 'missing' }, present ? 'set' : 'missing'),
           ),
         ),
       ),
-      React.createElement('div', { className: 'sidebar-section' },
-        React.createElement('div', { className: 'sidebar-label' }, 'Available Models'),
+      React.createElement(SettingsSection, {
+        id: 'available-models',
+        title: '可用模型',
+        meta: String(snapshot.models.length),
+      },
         snapshot.models.map((model) =>
           React.createElement('button', {
             key: `${model.id}|${model.api}`,
