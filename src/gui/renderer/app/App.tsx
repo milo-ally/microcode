@@ -9,6 +9,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import { ActivityButton } from '../components/ActivityButton.ts'
+import { ErrorBoundary } from '../components/ErrorBoundary.ts'
 import { CommandPalette } from '../features/command-palette/CommandPalette.ts'
 import { Composer } from '../features/composer/Composer.ts'
 import { Transcript } from '../features/timeline/Transcript.ts'
@@ -114,7 +115,9 @@ export function App() {
         ),
         React.createElement('button', { className: 'small-button', onClick: () => setPaletteOpen(true) }, React.createElement(Search, { size: 15 }), 'Commands'),
       ),
-      React.createElement(Transcript, { timeline, snapshot }),
+      React.createElement(ErrorBoundary, { resetKey: timeline.at(-1)?.id },
+        React.createElement(Transcript, { timeline, snapshot }),
+      ),
       React.createElement(Composer, { busy: Boolean(snapshot?.busy), snapshot }),
       React.createElement(StatusBar, { snapshot }),
     ),

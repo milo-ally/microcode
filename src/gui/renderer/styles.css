@@ -1862,6 +1862,23 @@ button {
   background: rgba(138, 190, 183, 0.08);
 }
 
+.render-error {
+  margin: 12px 28px;
+  border: 1px solid rgba(235, 110, 110, 0.45);
+  border-radius: 8px;
+  background: rgba(235, 110, 110, 0.08);
+  color: #f1b3b3;
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+}
+
+.render-error span {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 .question-actions {
   align-items: center;
   margin-top: 12px;

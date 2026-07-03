@@ -73,7 +73,10 @@ export function QuestionPermissionItem({
           className: cx('other-input', current && !question.options.some((o) => o.label === current) && 'selected'),
           placeholder: '输入其他答案',
           value: current && !question.options.some((o) => o.label === current) ? current : '',
-          onChange: (event) => setAnswers((prev) => ({ ...prev, [question.question]: event.currentTarget.value })),
+          onChange: (event) => {
+            const value = event.currentTarget.value
+            setAnswers((prev) => ({ ...prev, [question.question]: value }))
+          },
           onFocus: () => {
             if (question.options.some((o) => o.label === current)) {
               setAnswers((prev) => ({ ...prev, [question.question]: '' }))
@@ -96,4 +99,3 @@ export function QuestionPermissionItem({
     ),
   )
 }
-
