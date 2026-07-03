@@ -383,6 +383,50 @@ export function restoreGuiTimelineFromMessages(messages: readonly AgentMessage[]
   return timeline
 }
 
+export function upsertGuiCompactionItem(
+  timeline: GuiChatItem[],
+  activeId: string | undefined,
+  progress: Extract<MicrocodeAgentEvent, { type: 'compaction_changed' }>['progress'],
+  options: { now?: number; makeId?: () => string } = {},
+): string | undefined {
+  const now = options.now ?? Date.now()
+  let id = activeId
+  let item = id
+    ? timeline.find((entry): entry is GuiCompactionItem => entry.id === id && entry.kind === 'compaction')
+    : undefined
+
+  if (!item) {
+    id = options.makeId?.() ?? makeId('compaction')
+    item = {
+      id,
+      kind: 'compaction',
+      phase: progress.phase,
+      message: progress.message,
+      progress: Math.max(0, Math.min(100, progress.progress ?? 0)),
+      tokensBefore: progress.tokensBefore,
+      tokensAfter: progress.tokensAfter,
+      elapsedMs: progress.elapsedMs,
+      processedUnits: progress.processedUnits,
+      totalUnits: progress.totalUnits,
+      createdAt: now,
+      updatedAt: now,
+    }
+    timeline.push(item)
+  } else {
+    item.phase = progress.phase
+    item.message = progress.message
+    item.progress = Math.max(0, Math.min(100, progress.progress ?? item.progress))
+    item.tokensBefore = progress.tokensBefore
+    item.tokensAfter = progress.tokensAfter
+    item.elapsedMs = progress.elapsedMs
+    item.processedUnits = progress.processedUnits
+    item.totalUnits = progress.totalUnits
+    item.updatedAt = now
+  }
+
+  return progress.phase === 'done' ? undefined : id
+}
+
 function parseQuestions(input: Record<string, unknown>): GuiQuestion[] {
   const questions = Array.isArray(input.questions) ? input.questions : []
   return questions.map((raw) => {
