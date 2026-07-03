@@ -26,6 +26,7 @@ import {
 } from '../../tools/index.ts'
 import { TOOL_NAME as WRITE_TOOL_NAME } from '../../tools/FileWriteTool/FileWriteTool.ts'
 import { TOOL_NAME as EDIT_TOOL_NAME } from '../../tools/FileEditTool/FileEditTool.ts'
+import { TOOL_NAME as TASK_TOOL_NAME } from '../../tools/TaskTool/TaskTool.ts'
 import { type PermissionMode } from '../../permissions/index.ts'
 import {
   collectImagePathsFromText,
@@ -1103,6 +1104,10 @@ export class MicrocodeRuntime {
           details: event.result.details,
           isError: event.isError,
         })
+        if (event.toolName === TASK_TOOL_NAME && !event.isError) {
+          this.applyTaskToolResult(event.result.details)
+          void this.refreshDerivedState().then(() => this.emitSnapshot())
+        }
         break
       case 'compaction_changed':
         this.addNotice(event.progress.phase === 'done' ? 'success' : 'info', event.progress.message)
@@ -1282,6 +1287,24 @@ export class MicrocodeRuntime {
     for (const timer of this.completionTimers.values()) clearTimeout(timer)
     this.completionTimers.clear()
     this.lastToolUpdateAt.clear()
+  }
+
+  private applyTaskToolResult(details: unknown): void {
+    const list = (details as { list?: unknown } | undefined)?.list
+    if (!list || typeof list !== 'object') return
+    const taskList = list as Awaited<ReturnType<SessionManager['listTaskLists']>>[number]
+    if (typeof taskList.id !== 'string' || !Array.isArray(taskList.tasks)) return
+    const index = this.tasks.findIndex((candidate) => candidate.id === taskList.id)
+    if (index === -1) {
+      this.tasks = [taskList, ...this.tasks]
+    } else {
+      this.tasks = [
+        ...this.tasks.slice(0, index),
+        taskList,
+        ...this.tasks.slice(index + 1),
+      ]
+    }
+    this.emitSnapshot()
   }
 
   private requestPermission(
