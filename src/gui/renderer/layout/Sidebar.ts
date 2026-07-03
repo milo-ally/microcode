@@ -14,6 +14,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
 }) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>()
   const [selectedTaskListId, setSelectedTaskListId] = useState<string | undefined>()
+  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
 
   if (!snapshot) {
     return React.createElement('aside', { className: 'sidebar' },
@@ -146,11 +147,14 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   if (view === 'tasks') {
     const selectedList = snapshot.tasks.find((list) => list.id === selectedTaskListId)
       ?? snapshot.tasks[0]
-    const taskOptions = snapshot.tasks.map((task) => ({
+    const selectedTask = selectedList?.tasks.find((task) => task.id === selectedTaskId)
+      ?? selectedList?.tasks[0]
+    const taskOptions = selectedList?.tasks.map((task, index) => ({
       value: task.id,
-      label: task.title,
-      meta: `${task.tasks.filter((item) => item.completed).length}/${task.tasks.length}`,
+      label: task.content || `Task ${index + 1}`,
+      meta: task.completed ? 'done' : task.pending ? 'doing' : 'todo',
     }))
+      ?? []
     const stats = selectedList?.stats ?? (selectedList ? {
       total: selectedList.tasks.length,
       completed: selectedList.tasks.filter((task) => task.completed).length,
@@ -162,14 +166,21 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
       snapshot.tasks.length === 0
         ? React.createElement('div', { className: 'empty' }, '当前 session 还没有任务。')
         : React.createElement(React.Fragment, null,
-          React.createElement('div', { className: 'sidebar-picker' },
-            React.createElement('div', { className: 'sidebar-label' }, 'Task list'),
-            React.createElement(GlassSelect, {
-              value: selectedList?.id ?? taskOptions[0]?.value ?? '',
-              ariaLabel: 'Task list',
-              onChange: setSelectedTaskListId,
-              options: taskOptions,
-            }),
+          React.createElement('div', { className: 'task-list-picker' },
+            snapshot.tasks.map((task) =>
+              React.createElement('button', {
+                className: cx('task-list-row', selectedList?.id === task.id && 'active'),
+                key: task.id,
+                onClick: () => {
+                  setSelectedTaskListId(task.id)
+                  setSelectedTaskId(undefined)
+                },
+              },
+                React.createElement(FileText, { size: 15 }),
+                React.createElement('span', null, task.title),
+                React.createElement('small', null, `${task.tasks.filter((item) => item.completed).length}/${task.tasks.length}`),
+              ),
+            ),
           ),
           selectedList && React.createElement('div', { className: 'detail-card task-detail-card' },
             React.createElement('div', { className: 'detail-card-head' },
@@ -183,26 +194,31 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
               React.createElement('span', null, `left ${stats.remaining}`),
             ),
             React.createElement('div', { className: 'sidebar-label' }, 'Tasks'),
-            selectedList.tasks.map((item) =>
-              React.createElement('article', { className: cx('task-detail-row', item.completed && 'completed', item.pending && 'pending'), key: item.id },
-                React.createElement('div', { className: 'task-detail-top' },
-                  React.createElement('span', { className: cx('task-state-pill', item.completed ? 'done' : item.pending ? 'pending' : 'todo') },
-                    item.completed ? 'done' : item.pending ? 'pending' : 'todo',
-                  ),
-                  React.createElement('label', { className: 'task-reminder-toggle' },
-                    React.createElement('input', {
-                      type: 'checkbox',
-                      checked: item.reminder === true,
-                      disabled: item.completed,
-                      onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
-                        void window.microcode.remindTask(selectedList.id, item.id, event.currentTarget.checked),
-                    }),
-                    'priority',
-                  ),
+            taskOptions.length > 0 && React.createElement(GlassSelect, {
+              value: selectedTask?.id ?? taskOptions[0]?.value ?? '',
+              ariaLabel: 'Task',
+              onChange: setSelectedTaskId,
+              options: taskOptions,
+            }),
+            selectedTask && React.createElement('article', { className: cx('task-detail-row', selectedTask.completed && 'completed', selectedTask.pending && 'pending') },
+              React.createElement('div', { className: 'task-detail-top' },
+                React.createElement('span', { className: cx('task-state-pill', selectedTask.completed ? 'done' : selectedTask.pending ? 'pending' : 'todo') },
+                  selectedTask.completed ? 'done' : selectedTask.pending ? 'pending' : 'todo',
                 ),
-                React.createElement('strong', null, item.content),
-                React.createElement('small', null, `updated ${new Date(item.updatedAt).toLocaleString()}`),
+                React.createElement('label', { className: 'task-reminder-toggle' },
+                  React.createElement('input', {
+                    type: 'checkbox',
+                    checked: selectedTask.reminder === true,
+                    disabled: selectedTask.completed,
+                    onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+                      void window.microcode.remindTask(selectedList.id, selectedTask.id, event.currentTarget.checked),
+                  }),
+                  'priority',
+                ),
               ),
+              React.createElement('strong', null, selectedTask.content),
+              React.createElement('small', null, `created ${new Date(selectedTask.createdAt).toLocaleString()}`),
+              React.createElement('small', null, `updated ${new Date(selectedTask.updatedAt).toLocaleString()}`),
             ),
           ),
         ),
