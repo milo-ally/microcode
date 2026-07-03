@@ -763,10 +763,15 @@ button {
 }
 
 .settings-section {
-  overflow: hidden;
+  position: relative;
+  overflow: visible;
   border: 1px solid rgba(255, 255, 255, 0.085);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.025);
+}
+
+.settings-section:focus-within {
+  z-index: 50;
 }
 
 .settings-section + .settings-section {
