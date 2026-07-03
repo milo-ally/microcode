@@ -160,7 +160,7 @@ export function AutoScrollCodeFrame({
   live,
   scrollKey,
 }: {
-  children: React.ReactNode
+  children?: React.ReactNode
   className: string
   live: boolean
   scrollKey: string

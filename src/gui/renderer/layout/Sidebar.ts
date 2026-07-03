@@ -1,16 +1,35 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Plus, Server, Settings, Sparkles, Trash2, Workflow } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, FolderOpen, GitBranch, KeyRound, MessageSquare, PanelLeft, Plus, Server, Settings, Sparkles, Trash2, Workflow } from 'lucide-react'
 import { GlassSelect } from '../components/GlassSelect.ts'
 import { ApiConfigPanel } from '../features/settings/ApiConfigPanel.ts'
 import { cx } from '../lib/cx.ts'
-import type { GuiRuntimeSnapshot } from '../../shared/types.ts'
+import type { GuiRuntimeSnapshot, GuiWorkspaceItem } from '../../shared/types.ts'
 import type { View } from '../app/viewTypes.ts'
 
-export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
+function workspaceLabel(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
+}
+
+export function Sidebar({
+  view,
+  snapshot,
+  recentWorkspaces,
+  startupError,
+  workspaceBusy,
+  setView,
+  onToggleCollapse,
+  onPickWorkspace,
+  onOpenWorkspace,
+}: {
   view: View
   snapshot?: GuiRuntimeSnapshot
+  recentWorkspaces?: GuiWorkspaceItem[]
+  startupError?: string
+  workspaceBusy?: boolean
   setView: (view: View) => void
   onToggleCollapse: () => void
+  onPickWorkspace?: () => void
+  onOpenWorkspace?: (path: string) => void
 }) {
   const [expandedAgents, setExpandedAgents] = useState<Record<string, boolean>>({})
   const [expandedTaskLists, setExpandedTaskLists] = useState<Record<string, boolean>>({})
@@ -19,11 +38,61 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   const [configBusy, setConfigBusy] = useState<'mcp' | 'model' | null>(null)
   const [configError, setConfigError] = useState<string | undefined>()
   const [configSuccess, setConfigSuccess] = useState<string | undefined>()
+  const recentWorkspaceList = recentWorkspaces ?? []
+
+  const projectSwitcher = snapshot
+    ? React.createElement('button', {
+        className: 'project-switcher',
+        type: 'button',
+        disabled: workspaceBusy,
+        title: snapshot.cwd,
+        onClick: onPickWorkspace,
+      },
+        React.createElement(FolderOpen, { size: 15 }),
+        React.createElement('span', null,
+          React.createElement('strong', null, workspaceLabel(snapshot.cwd)),
+          React.createElement('small', null, snapshot.cwd),
+        ),
+      )
+    : React.createElement('button', {
+        className: 'project-switcher empty',
+        type: 'button',
+        disabled: workspaceBusy,
+        onClick: onPickWorkspace,
+      },
+        React.createElement(FolderOpen, { size: 15 }),
+        React.createElement('span', null,
+          React.createElement('strong', null, workspaceBusy ? 'Opening...' : 'Open Project'),
+          React.createElement('small', null, 'Choose a folder'),
+        ),
+      )
 
   if (!snapshot) {
     return React.createElement('aside', { className: 'sidebar' },
-      React.createElement('div', { className: 'sidebar-brand' }, 'Microcode'),
-      React.createElement('div', { className: 'muted' }, 'Starting runtime...'),
+      React.createElement('div', { className: 'sidebar-brand' },
+        React.createElement('span', null, 'Microcode'),
+      ),
+      projectSwitcher,
+      React.createElement('div', { className: 'sidebar-section' },
+        startupError
+          ? React.createElement('div', { className: 'config-error' }, startupError)
+          : React.createElement('div', { className: 'muted' }, 'Starting runtime...'),
+      ),
+      recentWorkspaceList.length > 0 && React.createElement('div', { className: 'sidebar-section' },
+        React.createElement('div', { className: 'sidebar-label' }, 'Recent Projects'),
+        recentWorkspaceList.slice(0, 10).map((workspace) =>
+          React.createElement('button', {
+            className: 'session-row',
+            key: workspace.path,
+            title: workspace.path,
+            disabled: workspaceBusy,
+            onClick: () => onOpenWorkspace?.(workspace.path),
+          },
+            React.createElement('strong', null, workspaceLabel(workspace.path)),
+            React.createElement('span', null, workspace.path),
+          ),
+        ),
+      ),
     )
   }
 
@@ -59,6 +128,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
       React.createElement('span', null, 'Microcode'),
       React.createElement('button', { title: '折叠侧边栏', onClick: onToggleCollapse }, React.createElement(PanelLeft, { size: 18 })),
     ),
+    projectSwitcher,
     nav,
     content && React.createElement('div', { className: 'sidebar-panel' }, content),
     !content && recent,

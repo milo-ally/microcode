@@ -144,6 +144,11 @@ export interface GuiSessionListItem {
   title?: string
 }
 
+export interface GuiWorkspaceItem {
+  path: string
+  lastOpenedAt: number
+}
+
 export interface GuiModelListItem {
   id: string
   name: string
@@ -200,7 +205,10 @@ export interface GuiConfigPasteResult {
 }
 
 export interface GuiApi {
-  start(options?: { resume?: boolean; resumeSessionId?: string; modelId?: string; permissionMode?: PermissionMode; thinkingLevel?: ThinkingLevel }): Promise<{ snapshot: GuiRuntimeSnapshot; timeline: GuiChatItem[] }>
+  start(options?: { cwd?: string; resume?: boolean; resumeSessionId?: string; modelId?: string; permissionMode?: PermissionMode; thinkingLevel?: ThinkingLevel }): Promise<{ snapshot: GuiRuntimeSnapshot; timeline: GuiChatItem[] }>
+  openWorkspace(cwd: string): Promise<{ snapshot: GuiRuntimeSnapshot; timeline: GuiChatItem[] }>
+  pickWorkspace(): Promise<{ snapshot: GuiRuntimeSnapshot; timeline: GuiChatItem[] } | null>
+  listWorkspaces(): Promise<GuiWorkspaceItem[]>
   prompt(input: GuiPromptInput): Promise<void>
   command(command: string): Promise<void>
   abort(): Promise<void>

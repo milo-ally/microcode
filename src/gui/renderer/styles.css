@@ -124,6 +124,56 @@ button {
   color: #f2f3f7;
 }
 
+.project-switcher {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  margin: 2px 0 10px;
+  border: 1px solid #242834;
+  border-radius: 6px;
+  background: #10131a;
+  color: #cdd1dc;
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-switcher:hover {
+  background: #1d212b;
+}
+
+.project-switcher:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.project-switcher span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-switcher strong,
+.project-switcher small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switcher strong {
+  color: #f2f3f7;
+  font-size: 12px;
+}
+
+.project-switcher small {
+  color: #858b98;
+  font-size: 11px;
+}
+
 .workspace-path {
   margin-top: 4px;
   overflow-wrap: anywhere;
@@ -737,6 +787,10 @@ button {
   min-width: 0;
 }
 
+.titlebar-actions {
+  flex-shrink: 0;
+}
+
 .titlebar strong {
   color: #f2f3f7;
 }
@@ -766,6 +820,13 @@ button {
   background: #1d212b;
 }
 
+.small-button:disabled,
+.wide-action:disabled,
+.prompt-suggestions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .transcript {
   min-height: 0;
   overflow: auto;
@@ -788,6 +849,13 @@ button {
 
 .welcome p {
   margin: 0;
+}
+
+.welcome .startup-error {
+  display: block;
+  max-width: 640px;
+  color: #cc6666;
+  text-align: center;
 }
 
 .chat-item,
@@ -3282,12 +3350,44 @@ textarea {
 }
 
 .sidebar {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
   padding: 10px 8px 12px;
 }
 
 .sidebar-brand {
   font-size: 19px;
+}
+
+.project-switcher {
+  margin: 0 0 10px;
+  min-height: 54px;
+  border-color: #202020;
+  background: #101114;
+  padding: 8px 10px;
+}
+
+.project-switcher:hover {
+  background: #171717;
+}
+
+.project-switcher strong {
+  font-size: 13px;
+}
+
+.project-switcher small {
+  font-size: 12px;
+}
+
+.chatgpt-nav {
+  min-height: 0;
+  padding-bottom: 14px;
+}
+
+.sidebar-panel,
+.recent-section {
+  min-height: 0;
+  overflow: auto;
 }
 
 .recent-section {
@@ -3297,6 +3397,18 @@ textarea {
 .recent-row {
   min-height: 32px;
   font-size: 14px;
+}
+
+.session-row {
+  min-width: 0;
+}
+
+.session-row strong,
+.session-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-footer,

@@ -2,7 +2,7 @@ import { dialog, ipcMain } from 'electron'
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { PermissionMode } from '../../permissions/index.ts'
 import type { GuiApiConfigInput, GuiPermissionDecision, GuiPromptInput } from '../shared/types.ts'
-import { getExistingRuntime, getMainWindow, getRuntime } from './runtimeHost.ts'
+import { getMainWindow, getRuntime, listRecentWorkspaces, openWorkspace, shutdownRuntime } from './runtimeHost.ts'
 
 export function registerIpc(): void {
   ipcMain.handle('microcode:start', async (_event, options) => {
@@ -11,6 +11,28 @@ export function registerIpc(): void {
       snapshot: active.getSnapshot(),
       timeline: active.getTimeline(),
     }
+  })
+  ipcMain.handle('microcode:openWorkspace', async (_event, cwd: string) => {
+    const active = await openWorkspace(cwd)
+    return {
+      snapshot: active.getSnapshot(),
+      timeline: active.getTimeline(),
+    }
+  })
+  ipcMain.handle('microcode:pickWorkspace', async () => {
+    const result = await dialog.showOpenDialog(getMainWindow()!, {
+      title: 'Open Project',
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const active = await openWorkspace(result.filePaths[0])
+    return {
+      snapshot: active.getSnapshot(),
+      timeline: active.getTimeline(),
+    }
+  })
+  ipcMain.handle('microcode:listWorkspaces', async () => {
+    return listRecentWorkspaces()
   })
   ipcMain.handle('microcode:prompt', async (_event, input: GuiPromptInput) => {
     await (await getRuntime()).prompt(input)
@@ -22,7 +44,7 @@ export function registerIpc(): void {
     await (await getRuntime()).abort()
   })
   ipcMain.handle('microcode:shutdown', async () => {
-    await getExistingRuntime()?.shutdown()
+    await shutdownRuntime()
   })
   ipcMain.handle('microcode:setModel', async (_event, modelId: string) => {
     await (await getRuntime()).setModel(modelId)

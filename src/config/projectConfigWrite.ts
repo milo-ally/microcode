@@ -47,9 +47,9 @@ function validateMcpServer(name: string, value: unknown): McpServerConfig {
     throw new Error(`Invalid MCP server name "${name}". Use letters, numbers, hyphens, or underscores.`)
   }
   if (!isRecord(value)) throw new Error(`Invalid MCP server "${name}": expected an object.`)
-  if (typeof value.command === 'string') return value as McpServerConfig
+  if (typeof value.command === 'string') return value as unknown as McpServerConfig
   if (typeof value.url === 'string' && ['sse', 'http', 'streamableHttp', 'ws'].includes(String(value.type))) {
-    return value as McpServerConfig
+    return value as unknown as McpServerConfig
   }
   throw new Error(`Invalid MCP server "${name}": expected stdio { command } or remote { type, url }.`)
 }

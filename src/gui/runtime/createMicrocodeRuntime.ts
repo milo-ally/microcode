@@ -589,7 +589,7 @@ export class MicrocodeRuntime {
   }
 
   async listSessions(): Promise<GuiSessionListItem[]> {
-    const sessions = await this.sessionManager.listWithTitles()
+    const sessions = await this.sessionManager.listWithTitles(this.cwd)
     return sessions.map((session) => normalizeSession({
       ...session,
       title: this.sessionManager.getTitle(session.id),
@@ -597,7 +597,7 @@ export class MicrocodeRuntime {
   }
 
   async switchSession(sessionId: string): Promise<void> {
-    const sessions = await this.sessionManager.listWithTitles()
+    const sessions = await this.sessionManager.listWithTitles(this.cwd)
     const selected = sessions.find((session) => session.id === sessionId || session.id.startsWith(sessionId))
     if (!selected) throw new Error(`Session not found: ${sessionId}`)
     if (selected.id === this.sessionManager.getSessionId()) {

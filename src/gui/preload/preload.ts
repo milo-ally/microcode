@@ -13,6 +13,9 @@ function setZoomLevel(next: number): number {
 
 const api: GuiApi = {
   start: (options) => ipcRenderer.invoke('microcode:start', options),
+  openWorkspace: (cwd: string) => ipcRenderer.invoke('microcode:openWorkspace', cwd),
+  pickWorkspace: () => ipcRenderer.invoke('microcode:pickWorkspace'),
+  listWorkspaces: () => ipcRenderer.invoke('microcode:listWorkspaces'),
   prompt: (input: GuiPromptInput) => ipcRenderer.invoke('microcode:prompt', input),
   command: (command: string) => ipcRenderer.invoke('microcode:command', command),
   abort: () => ipcRenderer.invoke('microcode:abort'),
