@@ -1877,6 +1877,136 @@ button {
   font-size: 12px;
 }
 
+.compaction-item {
+  display: grid;
+  gap: 9px;
+  max-width: 980px;
+  margin: 0 auto 16px;
+  border: 1px solid rgba(215, 222, 122, 0.32);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(215, 222, 122, 0.085), rgba(255, 255, 255, 0.035));
+  padding: 12px 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.compaction-item.done {
+  border-color: rgba(181, 189, 104, 0.35);
+  background:
+    linear-gradient(180deg, rgba(181, 189, 104, 0.09), rgba(255, 255, 255, 0.035));
+}
+
+.compaction-item.failed {
+  border-color: rgba(204, 102, 102, 0.45);
+  background:
+    linear-gradient(180deg, rgba(204, 102, 102, 0.1), rgba(255, 255, 255, 0.035));
+}
+
+.compaction-head,
+.compaction-title,
+.compaction-meta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.compaction-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.compaction-title {
+  gap: 8px;
+}
+
+.compaction-title svg {
+  flex: 0 0 auto;
+  color: #d7de7a;
+}
+
+.compaction-item.done .compaction-title svg {
+  color: #b5bd68;
+}
+
+.compaction-item.failed .compaction-title svg {
+  color: #cc6666;
+}
+
+.compaction-title strong {
+  overflow: hidden;
+  color: #f4f4f6;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compaction-head > span {
+  color: rgba(245, 245, 247, 0.72);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.compaction-bar {
+  position: relative;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.085);
+}
+
+.compaction-bar span {
+  display: block;
+  height: 100%;
+  min-width: 8px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #d7de7a, #8fd7c7);
+  transition: width 180ms ease;
+}
+
+.compaction-bar.active::after {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  animation: compact-shimmer 1.1s linear infinite;
+  content: "";
+}
+
+.compaction-message {
+  overflow: hidden;
+  color: #c9ced8;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compaction-meta {
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(245, 245, 247, 0.54);
+  font-size: 11px;
+}
+
+.compaction-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes compact-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
 .command-path-row,
 .command-current-model {
   display: grid;
