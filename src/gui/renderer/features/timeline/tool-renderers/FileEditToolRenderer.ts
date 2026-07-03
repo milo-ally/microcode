@@ -1,7 +1,7 @@
 import React from 'react'
 import { FilePenLine } from 'lucide-react'
 import { diffLines } from 'diff'
-import { getDetailNumber, getDetailString, MetricRow, OutputBlock, preview, shortPath, ToolFrame } from './helpers.ts'
+import { AutoScrollCodeFrame, getDetailNumber, getDetailString, MetricRow, OutputBlock, preview, shortPath, ToolFrame } from './helpers.ts'
 import type { ToolRendererProps } from './types.ts'
 import { highlightLineSegments } from '../../../lib/syntaxHighlight.ts'
 
@@ -23,7 +23,7 @@ function renderHighlightedDiffText(text: string, language: string): React.ReactN
   ]
 }
 
-function compactDiff(oldText: string, newText: string, expanded: boolean, language: string): React.ReactNode {
+function compactDiff(oldText: string, newText: string, expanded: boolean, language: string, live: boolean): React.ReactNode {
   if (!oldText && !newText) return null
   const lines: Array<{ kind: 'add' | 'remove' | 'context'; text: string }> = []
   for (const part of diffLines(oldText, newText)) {
@@ -41,7 +41,11 @@ function compactDiff(oldText: string, newText: string, expanded: boolean, langua
       React.createElement('span', null, 'Diff'),
       React.createElement('span', null, `${lines.length.toLocaleString()} lines`),
     ),
-    React.createElement('pre', { className: expanded ? 'tool-code-frame expanded' : 'tool-code-frame' },
+    React.createElement(AutoScrollCodeFrame, {
+      className: expanded ? 'tool-code-frame expanded' : 'tool-code-frame',
+      live,
+      scrollKey: `${expanded ? 'expanded' : 'compact'}:${lines.length}:${oldText.length}:${newText.length}`,
+    },
       lines.map((line, index) =>
         React.createElement('div', { className: `tool-code-line ${line.kind}`, key: `${index}-${line.text}` },
           React.createElement('span', { className: 'tool-code-text' }, line.text ? renderHighlightedDiffText(line.text, language) : ' '),
@@ -61,6 +65,7 @@ export function FileEditToolRenderer({ item, expanded, onToggleExpanded }: ToolR
   const rawOldText = typeof item.args.old_string === 'string' ? item.args.old_string : ''
   const rawNewText = typeof item.args.new_string === 'string' ? item.args.new_string : ''
   const oldText = typeof item.args.old_string === 'string' ? preview(item.args.old_string, 72) : ''
+  const livePreview = item.status === 'running' || phase === 'preparing' || phase === 'writing'
   const summary = [
     phase === 'preparing' ? 'preparing' : phase === 'writing' ? 'writing' : undefined,
     replacements !== undefined ? `${replacements} repl` : undefined,
@@ -83,7 +88,7 @@ export function FileEditToolRenderer({ item, expanded, onToggleExpanded }: ToolR
         phase,
       ],
     }),
-    compactDiff(rawOldText, rawNewText, expanded, language),
+    compactDiff(rawOldText, rawNewText, expanded, language, livePreview),
     item.status === 'error' && React.createElement(OutputBlock, { item, expanded, onToggleExpanded, label: 'Error' }),
   )
 }

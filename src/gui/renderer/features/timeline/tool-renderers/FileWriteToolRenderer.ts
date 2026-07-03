@@ -1,6 +1,6 @@
 import React from 'react'
 import { FileUp } from 'lucide-react'
-import { formatBytes, getDetailNumber, getDetailString, MetricRow, shortPath, ToolFrame } from './helpers.ts'
+import { AutoScrollCodeFrame, formatBytes, getDetailNumber, getDetailString, MetricRow, shortPath, ToolFrame } from './helpers.ts'
 import type { ToolRendererProps } from './types.ts'
 import { highlightLineSegments } from '../../../lib/syntaxHighlight.ts'
 
@@ -17,16 +17,18 @@ function renderHighlightedLine(line: string, language: string): React.ReactNode[
   )
 }
 
-function inlineCodePreview(content: string, expanded: boolean, language: string): React.ReactNode {
+function inlineCodePreview(content: string, expanded: boolean, language: string, live: boolean): React.ReactNode {
   const lines = content.split('\n')
   const gutterWidth = String(Math.max(1, lines.length)).length
+  const className = expanded ? 'tool-code-frame expanded' : 'tool-code-frame'
+  const scrollKey = `${expanded ? 'expanded' : 'compact'}:${lines.length}:${content.length}`
 
   return React.createElement('div', { className: 'tool-code-preview' },
     React.createElement('div', { className: 'tool-code-preview-head' },
       React.createElement('span', null, 'Content'),
       React.createElement('span', null, `${lines.length.toLocaleString()} lines`),
     ),
-    React.createElement('pre', { className: expanded ? 'tool-code-frame expanded' : 'tool-code-frame' },
+    React.createElement(AutoScrollCodeFrame, { className, live, scrollKey },
       lines.map((line, index) =>
         React.createElement('div', { className: 'tool-code-line', key: `${index}-${line}` },
           React.createElement('span', { className: 'tool-code-gutter' }, String(index + 1).padStart(gutterWidth, ' ')),
@@ -46,6 +48,7 @@ export function FileWriteToolRenderer({ item, expanded, onToggleExpanded }: Tool
   const phase = getDetailString(item.details, 'phase')
   const byteText = formatBytes(item.details?.bytesWritten)
   const language = languageFromPath(path)
+  const livePreview = item.status === 'running' || phase === 'preparing' || phase === 'writing'
   const summary = [
     phase === 'preparing' ? 'preparing' : phase === 'writing' ? 'writing' : undefined,
     additions !== undefined ? `+${additions}` : undefined,
@@ -71,6 +74,6 @@ export function FileWriteToolRenderer({ item, expanded, onToggleExpanded }: Tool
       ],
     }),
     warning && React.createElement('div', { className: 'tool-warning' }, warning),
-    previewText && inlineCodePreview(previewText, expanded, language),
+    previewText && inlineCodePreview(previewText, expanded, language, livePreview),
   )
 }

@@ -154,6 +154,33 @@ export function OutputBlock({
   )
 }
 
+export function AutoScrollCodeFrame({
+  children,
+  className,
+  live,
+  scrollKey,
+}: {
+  children: React.ReactNode
+  className: string
+  live: boolean
+  scrollKey: string
+}) {
+  const ref = React.useRef<HTMLPreElement | null>(null)
+
+  React.useLayoutEffect(() => {
+    if (!live || !ref.current) return
+    const frame = ref.current
+    frame.scrollTop = frame.scrollHeight
+    if (typeof requestAnimationFrame !== 'function') return
+    const animationFrame = requestAnimationFrame(() => {
+      frame.scrollTop = frame.scrollHeight
+    })
+    return () => cancelAnimationFrame(animationFrame)
+  }, [live, scrollKey])
+
+  return React.createElement('pre', { className, ref }, children)
+}
+
 function formatVisibleLines(
   lines: string[],
   running: boolean,
