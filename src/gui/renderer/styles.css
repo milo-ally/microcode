@@ -314,6 +314,57 @@ button {
   opacity: 0.55;
 }
 
+.skill-list {
+  display: grid;
+  gap: 8px;
+}
+
+.skill-row {
+  cursor: default;
+}
+
+.skill-row.loaded {
+  border: 1px solid rgba(181, 189, 104, 0.24);
+  background: rgba(181, 189, 104, 0.06);
+}
+
+.skill-row.disabled {
+  opacity: 0.58;
+}
+
+.skill-row-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.skill-row-head button {
+  min-height: 26px;
+  border: 1px solid #2b3140;
+  border-radius: 5px;
+  background: #161a23;
+  color: #cdd1dc;
+  cursor: pointer;
+  padding: 0 8px;
+}
+
+.skill-row-head button:hover:not(:disabled) {
+  background: #1d212b;
+}
+
+.skill-row-head button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.skill-row p {
+  margin: 2px 0 0;
+  color: #aeb4c1;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .task-row {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
@@ -1064,6 +1115,10 @@ button {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.tool-code-frame.expanded {
+  max-height: 520px;
 }
 
 .tool-code-line {

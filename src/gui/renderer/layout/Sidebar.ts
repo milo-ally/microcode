@@ -50,7 +50,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
         className: cx('recent-row', session.id === snapshot.sessionId && 'active'),
         key: session.id,
         onClick: () => void window.microcode.switchSession(session.id),
-      }, session.title || session.id.slice(0, 8)),
+      }, session.title || '新会话'),
     ),
   )
 
@@ -252,7 +252,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
                 React.createElement('button', {
                   disabled: skill.disabled,
                   onClick: () => void window.microcode.toggleSkill(skill.name),
-                }, skill.disabled ? 'disabled' : skill.loaded ? 'Disable' : 'Enable'),
+                }, skill.disabled ? '不可用' : skill.loaded ? '禁用' : '开启'),
               ),
               React.createElement('p', null, skill.description),
               React.createElement('small', null, skill.filePath),
@@ -374,7 +374,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
               key: session.id,
               onClick: () => void window.microcode.switchSession(session.id),
             },
-              React.createElement('strong', null, session.title || '(no title)'),
+              React.createElement('strong', null, session.title || '新会话'),
               React.createElement('span', null, `${session.id.slice(0, 8)} · ${session.createdAt ? new Date(session.createdAt).toLocaleString() : ''}`),
               React.createElement('span', null, session.cwd),
             ),

@@ -51,6 +51,8 @@ export interface GuiToolItem {
   summary?: string
   details?: Record<string, unknown>
   isError?: boolean
+  waitingForPermission?: boolean
+  permissionRequestId?: string
 }
 
 export interface GuiNoticeItem {

@@ -4,9 +4,6 @@ import { formatBytes, getDetailNumber, getDetailString, MetricRow, shortPath, To
 import type { ToolRendererProps } from './types.ts'
 import { highlightLineSegments } from '../../../lib/syntaxHighlight.ts'
 
-const INLINE_PREVIEW_LINES = 10
-const EXPANDED_PREVIEW_LINES = 80
-
 function languageFromPath(path: string): string {
   return path.split('.').pop() ?? ''
 }
@@ -22,25 +19,19 @@ function renderHighlightedLine(line: string, language: string): React.ReactNode[
 
 function inlineCodePreview(content: string, expanded: boolean, language: string): React.ReactNode {
   const lines = content.split('\n')
-  const limit = expanded ? EXPANDED_PREVIEW_LINES : INLINE_PREVIEW_LINES
-  const shown = lines.slice(0, limit)
-  const truncated = lines.length > shown.length
-  const gutterWidth = String(Math.max(1, shown.length)).length
+  const gutterWidth = String(Math.max(1, lines.length)).length
 
   return React.createElement('div', { className: 'tool-code-preview' },
     React.createElement('div', { className: 'tool-code-preview-head' },
       React.createElement('span', null, 'Content'),
       React.createElement('span', null, `${lines.length.toLocaleString()} lines`),
     ),
-    React.createElement('pre', { className: 'tool-code-frame' },
-      shown.map((line, index) =>
+    React.createElement('pre', { className: expanded ? 'tool-code-frame expanded' : 'tool-code-frame' },
+      lines.map((line, index) =>
         React.createElement('div', { className: 'tool-code-line', key: `${index}-${line}` },
           React.createElement('span', { className: 'tool-code-gutter' }, String(index + 1).padStart(gutterWidth, ' ')),
           React.createElement('span', { className: 'tool-code-text' }, line ? renderHighlightedLine(line, language) : ' '),
         ),
-      ),
-      truncated && React.createElement('div', { className: 'tool-code-omitted', key: 'omitted' },
-        `... ${lines.length - shown.length} more lines`,
       ),
     ),
   )

@@ -832,6 +832,7 @@ export class MicrocodeRuntime {
     const pending = this.pendingPermissions.get(requestId)
     if (!pending) return
     this.pendingPermissions.delete(requestId)
+    this.clearToolPermissionWait(requestId)
     const allowed = decision === 'allow' || decision === 'allow-session'
     if (decision === 'allow-session') {
       this.agent.addSessionPermission(pending.request.toolName, pending.ruleContent)
@@ -1374,6 +1375,7 @@ export class MicrocodeRuntime {
       status: 'pending',
       createdAt: Date.now(),
     })
+    this.markToolWaitingForPermission(toolName, request.id)
     this.emitTimeline()
     this.emitSnapshot()
     return new Promise((resolve) => {
@@ -1418,6 +1420,29 @@ export class MicrocodeRuntime {
     const item = this.timeline.find((entry) => entry.kind === 'permission' && entry.requestId === requestId)
     if (item?.kind === 'permission') item.status = status
     this.emitTimeline()
+  }
+
+  private markToolWaitingForPermission(toolName: string, requestId: string): void {
+    for (let index = this.timeline.length - 1; index >= 0; index--) {
+      const item = this.timeline[index]
+      if (item.kind !== 'tool') continue
+      if (item.toolName !== toolName || item.status !== 'running') continue
+      item.waitingForPermission = true
+      item.permissionRequestId = requestId
+      item.statusText = 'Waiting for permission'
+      break
+    }
+  }
+
+  private clearToolPermissionWait(requestId: string): void {
+    for (const item of this.timeline) {
+      if (item.kind !== 'tool' || item.permissionRequestId !== requestId) continue
+      item.waitingForPermission = false
+      item.permissionRequestId = undefined
+      if (item.status === 'running' && item.statusText === 'Waiting for permission') {
+        item.statusText = 'Running...'
+      }
+    }
   }
 
   private extractRuleContent(toolName: string, input: Record<string, unknown>): string | undefined {

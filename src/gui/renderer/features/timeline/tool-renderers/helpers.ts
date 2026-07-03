@@ -134,6 +134,11 @@ export function OutputBlock({
   const lines = raw ? raw.split('\n') : []
   const visible = formatVisibleLines(lines, item.status === 'running', expanded, preferTailWhileRunning)
   const canExpand = lines.length > visible.displayedLineCount
+  const emptyText = item.waitingForPermission
+    ? 'Waiting for permission...'
+    : item.status === 'running'
+      ? 'Running...'
+      : 'No output.'
   return React.createElement('div', { className: 'tool-stream' },
     React.createElement('div', { className: 'tool-stream-head' },
       item.status === 'running' && React.createElement('span', { className: 'live-dot' }),
@@ -145,7 +150,7 @@ export function OutputBlock({
     ),
     raw
       ? React.createElement('pre', { className: 'tool-output' }, visible.text)
-      : React.createElement('div', { className: 'tool-output empty-output' }, 'Waiting for output...'),
+      : React.createElement('div', { className: 'tool-output empty-output' }, emptyText),
   )
 }
 

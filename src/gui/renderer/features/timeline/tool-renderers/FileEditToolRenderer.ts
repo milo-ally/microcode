@@ -5,9 +5,6 @@ import { getDetailNumber, getDetailString, MetricRow, OutputBlock, preview, shor
 import type { ToolRendererProps } from './types.ts'
 import { highlightLineSegments } from '../../../lib/syntaxHighlight.ts'
 
-const INLINE_DIFF_LINES = 12
-const EXPANDED_DIFF_LINES = 120
-
 function languageFromPath(path: string): string {
   return path.split('.').pop() ?? ''
 }
@@ -39,23 +36,16 @@ function compactDiff(oldText: string, newText: string, expanded: boolean, langua
     }
   }
 
-  const limit = expanded ? EXPANDED_DIFF_LINES : INLINE_DIFF_LINES
-  const shown = lines.slice(0, limit)
-  const omitted = lines.length - shown.length
-
   return React.createElement('div', { className: 'tool-code-preview tool-diff-preview' },
     React.createElement('div', { className: 'tool-code-preview-head' },
       React.createElement('span', null, 'Diff'),
       React.createElement('span', null, `${lines.length.toLocaleString()} lines`),
     ),
-    React.createElement('pre', { className: 'tool-code-frame' },
-      shown.map((line, index) =>
+    React.createElement('pre', { className: expanded ? 'tool-code-frame expanded' : 'tool-code-frame' },
+      lines.map((line, index) =>
         React.createElement('div', { className: `tool-code-line ${line.kind}`, key: `${index}-${line.text}` },
           React.createElement('span', { className: 'tool-code-text' }, line.text ? renderHighlightedDiffText(line.text, language) : ' '),
         ),
-      ),
-      omitted > 0 && React.createElement('div', { className: 'tool-code-omitted', key: 'omitted' },
-        `... ${omitted} more lines`,
       ),
     ),
   )
