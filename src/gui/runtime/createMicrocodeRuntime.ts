@@ -1551,45 +1551,7 @@ export class MicrocodeRuntime {
   }
 
   private upsertCompaction(progress: Extract<MicrocodeAgentEvent, { type: 'compaction_changed' }>['progress']): void {
-    const now = Date.now()
-    let id = this.activeCompactionItemId
-    let item = id
-      ? this.timeline.find((entry): entry is GuiCompactionItem => entry.id === id && entry.kind === 'compaction')
-      : undefined
-
-    if (!item) {
-      id = makeId('compaction')
-      this.activeCompactionItemId = id
-      item = {
-        id,
-        kind: 'compaction',
-        phase: progress.phase,
-        message: progress.message,
-        progress: Math.max(0, Math.min(100, progress.progress ?? 0)),
-        tokensBefore: progress.tokensBefore,
-        tokensAfter: progress.tokensAfter,
-        elapsedMs: progress.elapsedMs,
-        processedUnits: progress.processedUnits,
-        totalUnits: progress.totalUnits,
-        createdAt: now,
-        updatedAt: now,
-      }
-      this.timeline.push(item)
-    } else {
-      item.phase = progress.phase
-      item.message = progress.message
-      item.progress = Math.max(0, Math.min(100, progress.progress ?? item.progress))
-      item.tokensBefore = progress.tokensBefore
-      item.tokensAfter = progress.tokensAfter
-      item.elapsedMs = progress.elapsedMs
-      item.processedUnits = progress.processedUnits
-      item.totalUnits = progress.totalUnits
-      item.updatedAt = now
-    }
-
-    if (progress.phase === 'done') {
-      this.activeCompactionItemId = undefined
-    }
+    this.activeCompactionItemId = upsertGuiCompactionItem(this.timeline, this.activeCompactionItemId, progress)
     this.emitTimeline()
   }
 

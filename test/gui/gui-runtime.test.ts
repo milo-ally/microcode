@@ -4,7 +4,9 @@ import {
   extractStreamingToolCalls,
   getStreamingToolDetails,
   restoreGuiTimelineFromMessages,
+  upsertGuiCompactionItem,
 } from '../../src/gui/runtime/createMicrocodeRuntime.ts'
+import type { GuiChatItem } from '../../src/gui/shared/types.ts'
 
 describe('GUI runtime timeline restore', () => {
   test('rebuilds completed tool cards from persisted tool call and result messages', () => {
@@ -146,5 +148,46 @@ describe('GUI runtime timeline restore', () => {
         args: { file_path: 'src/app.ts' },
       },
     ])
+  })
+
+  test('updates one compact progress item instead of appending repeated notices', () => {
+    const timeline: GuiChatItem[] = []
+    let activeId = upsertGuiCompactionItem(timeline, undefined, {
+      phase: 'summarizing',
+      message: 'Summarizing earlier history...',
+      progress: 20,
+      tokensBefore: 45694,
+      processedUnits: 12,
+      totalUnits: 20,
+    }, { now: 1000, makeId: () => 'compact-1' })
+
+    activeId = upsertGuiCompactionItem(timeline, activeId, {
+      phase: 'summarizing',
+      message: 'Summarizing earlier history...',
+      progress: 54,
+      tokensBefore: 45694,
+      processedUnits: 12,
+      totalUnits: 20,
+    }, { now: 1250, makeId: () => 'compact-2' })
+
+    activeId = upsertGuiCompactionItem(timeline, activeId, {
+      phase: 'done',
+      message: 'Compacted: 45694 -> 9459 tokens',
+      progress: 100,
+      tokensBefore: 45694,
+      tokensAfter: 9459,
+    }, { now: 1500, makeId: () => 'compact-3' })
+
+    expect(activeId).toBeUndefined()
+    expect(timeline).toHaveLength(1)
+    expect(timeline[0]).toMatchObject({
+      id: 'compact-1',
+      kind: 'compaction',
+      phase: 'done',
+      progress: 100,
+      tokensBefore: 45694,
+      tokensAfter: 9459,
+      updatedAt: 1500,
+    })
   })
 })
