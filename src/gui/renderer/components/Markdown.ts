@@ -23,6 +23,24 @@ export function renderMarkdownHtml(text: string): string {
   return marked.parse(text, { async: false, gfm: true, renderer }) as string
 }
 
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const ok = document.execCommand('copy')
+  textarea.remove()
+  if (!ok) throw new Error('Copy failed')
+}
+
 export function Markdown({ text }: { text: string }) {
   const html = useMemo(() => renderMarkdownHtml(text), [text])
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -32,7 +50,7 @@ export function Markdown({ text }: { text: string }) {
     const code = block?.querySelector('code')?.textContent ?? ''
     if (!code) return
 
-    void navigator.clipboard.writeText(code).then(() => {
+    void copyText(code).then(() => {
       button.textContent = 'Copied'
       window.setTimeout(() => {
         if (button.isConnected) button.textContent = 'Copy'
