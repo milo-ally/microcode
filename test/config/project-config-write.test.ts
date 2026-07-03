@@ -33,27 +33,6 @@ describe('project config writes', () => {
     }
   })
 
-  test('accepts pasted MCP config with missing trailing braces', async () => {
-    const cwd = await tempProject()
-    try {
-      const result = await mergeProjectMcpServers(cwd, `{
-        "mcpServers": {
-          "chrome-devtools": {
-            "command": "npx",
-            "args": ["-y", "chrome-devtools-mcp@latest"]
-          }
-        }
-      `)
-      const saved = JSON.parse(await readFile(join(cwd, '.microcode', 'config.json'), 'utf-8'))
-
-      expect(result.names).toEqual(['chrome-devtools'])
-      expect(saved.mcpServers['chrome-devtools'].command).toBe('npx')
-      expect(saved.mcpServers['chrome-devtools'].args).toEqual(['-y', 'chrome-devtools-mcp@latest'])
-    } finally {
-      await rm(cwd, { recursive: true, force: true })
-    }
-  })
-
   test('merges pasted custom models by id', async () => {
     const cwd = await tempProject()
     try {

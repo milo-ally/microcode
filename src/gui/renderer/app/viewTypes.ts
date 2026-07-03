@@ -1,1 +1,1 @@
-export type View = 'chat' | 'sessions' | 'agents' | 'tasks' | 'mcp' | 'settings'
+export type View = 'chat' | 'sessions' | 'agents' | 'tasks' | 'mcp' | 'skills' | 'settings'

@@ -6,6 +6,7 @@ import {
   Search,
   Server,
   Settings,
+  Sparkles,
   Workflow,
 } from 'lucide-react'
 import { ActivityButton } from '../components/ActivityButton.ts'
@@ -129,6 +130,7 @@ export function App() {
         React.createElement(ActivityButton, { active: view === 'agents', label: 'Agents', icon: React.createElement(Workflow, { size: 21 }), onClick: () => setView('agents') }),
         React.createElement(ActivityButton, { active: view === 'tasks', label: 'Tasks', icon: React.createElement(GitBranch, { size: 21 }), onClick: () => setView('tasks') }),
         React.createElement(ActivityButton, { active: view === 'mcp', label: 'MCP', icon: React.createElement(Server, { size: 21 }), onClick: () => setView('mcp') }),
+        React.createElement(ActivityButton, { active: view === 'skills', label: 'Skills', icon: React.createElement(Sparkles, { size: 21 }), onClick: () => setView('skills') }),
       ),
       React.createElement('div', { className: 'activity-bottom' },
         React.createElement(ActivityButton, { active: false, label: 'Command Palette', icon: React.createElement(Search, { size: 21 }), onClick: () => setPaletteOpen(true) }),
@@ -162,7 +164,7 @@ export function App() {
       React.createElement('header', { className: 'titlebar' },
         React.createElement('div', null,
           React.createElement('strong', null, 'Microcode'),
-          React.createElement('span', null, snapshot?.sessionTitle || snapshot?.sessionId?.slice(0, 8) || 'New session'),
+          React.createElement('span', null, snapshot?.sessionTitle || '新会话'),
         ),
         React.createElement('button', { className: 'small-button', onClick: () => setPaletteOpen(true) }, React.createElement(Search, { size: 15 }), 'Commands'),
       ),

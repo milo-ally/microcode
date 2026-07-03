@@ -1,5 +1,5 @@
 import type { AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core'
-import type { Api, ImageContent, Model } from '@earendil-works/pi-ai'
+import { completeSimple, type Api, type ImageContent, type Model } from '@earendil-works/pi-ai'
 import { homedir } from 'os'
 import { isAbsolute, join, resolve } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
@@ -680,7 +680,7 @@ export class MicrocodeRuntime {
       ],
       createdAt: Date.now(),
     })
-    await this.ensureSessionTitle(cleanText)
+    void this.ensureSessionTitle(cleanText)
     const thinkingId = makeId('assistant')
     this.pendingAssistantMessageId = thinkingId
     this.streamingMessageId = thinkingId
@@ -1027,18 +1027,30 @@ export class MicrocodeRuntime {
       this.titleGenerated = true
       return
     }
-    const title = text
-      .trim()
-      .replace(/\s+/g, ' ')
-      .split(' ')
-      .filter(Boolean)
-      .slice(0, 5)
-      .join(' ') || 'New conversation'
-    this.sessionManager.setTitle(
-      sessionId,
-      title.length > 60 ? `${title.slice(0, 57)}...` : title,
-    )
+    const cleanText = text.trim().replace(/\s+/g, ' ')
+    if (!cleanText) return
+
     this.titleGenerated = true
+    const fallbackTitle = cleanText.length > 60 ? `${cleanText.slice(0, 57)}...` : cleanText
+    let title = fallbackTitle
+
+    try {
+      const model = this.agent.getCurrentModel()
+      const apiKey = resolveApiKey(model)
+      const result = await completeSimple(model, {
+        systemPrompt: 'Generate a short, concise title (5 words max) for a conversation. Reply with ONLY the title, no quotes, no explanation.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: `Generate a title for a conversation that starts with: "${cleanText.slice(0, 200)}"` }] }],
+      } as any, { apiKey, maxTokens: 30, temperature: 0.3 })
+
+      const titleContent = result.content.find((c: any) => c.type === 'text') as any
+      if (titleContent?.text) {
+        title = titleContent.text.trim().replace(/^["']|["']$/g, '')
+      }
+    } catch {
+      // Fall back to the user's first message.
+    }
+
+    this.sessionManager.setTitle(sessionId, title.length > 60 ? `${title.slice(0, 57)}...` : title)
     await this.refreshDerivedState()
     this.emitSnapshot()
   }

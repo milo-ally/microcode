@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Plus, Server, Settings, Trash2, Workflow } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, GitBranch, KeyRound, MessageSquare, PanelLeft, Plus, Server, Settings, Sparkles, Trash2, Workflow } from 'lucide-react'
 import { GlassSelect } from '../components/GlassSelect.ts'
 import { ApiConfigPanel } from '../features/settings/ApiConfigPanel.ts'
 import { cx } from '../lib/cx.ts'
@@ -39,6 +39,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
     React.createElement('button', { className: cx('nav-row', view === 'agents' && 'active'), onClick: () => setView('agents') }, React.createElement(Workflow, { size: 18 }), '代理'),
     React.createElement('button', { className: cx('nav-row', view === 'tasks' && 'active'), onClick: () => setView('tasks') }, React.createElement(GitBranch, { size: 18 }), '任务'),
     React.createElement('button', { className: cx('nav-row', view === 'mcp' && 'active'), onClick: () => setView('mcp') }, React.createElement(Server, { size: 18 }), 'MCP'),
+    React.createElement('button', { className: cx('nav-row', view === 'skills' && 'active'), onClick: () => setView('skills') }, React.createElement(Sparkles, { size: 18 }), '技能'),
     React.createElement('button', { className: cx('nav-row', view === 'settings' && 'active'), onClick: () => setView('settings') }, React.createElement(Settings, { size: 18 }), '模型与设置'),
   )
 
@@ -233,6 +234,29 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
                 ),
               )
             }),
+          ),
+        ),
+    ))
+  }
+
+  if (view === 'skills') {
+    return shell(React.createElement(React.Fragment, null,
+      React.createElement('div', { className: 'panel-title' }, '技能'),
+      snapshot.skills.length === 0
+        ? React.createElement('div', { className: 'empty' }, 'No skills found.')
+        : React.createElement('div', { className: 'skill-list' },
+          snapshot.skills.map((skill) =>
+            React.createElement('article', { className: cx('skill-row', skill.loaded && 'loaded', skill.disabled && 'disabled'), key: skill.name },
+              React.createElement('div', { className: 'skill-row-head' },
+                React.createElement('strong', null, skill.name),
+                React.createElement('button', {
+                  disabled: skill.disabled,
+                  onClick: () => void window.microcode.toggleSkill(skill.name),
+                }, skill.disabled ? 'disabled' : skill.loaded ? 'Disable' : 'Enable'),
+              ),
+              React.createElement('p', null, skill.description),
+              React.createElement('small', null, skill.filePath),
+            ),
           ),
         ),
     ))
