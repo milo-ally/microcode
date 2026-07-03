@@ -10,7 +10,7 @@ async function tempProject(): Promise<string> {
 
 describe('project config writes', () => {
   test('merges pasted MCP servers without dropping existing config keys', async () => {
-      const cwd = await tempProject()
+    const cwd = await tempProject()
     try {
       const configPath = join(cwd, '.microcode', 'config.json')
       await mkdir(join(cwd, '.microcode'), { recursive: true })
@@ -28,6 +28,27 @@ describe('project config writes', () => {
       expect(saved.mcpServers.old.command).toBe('old')
       expect(saved.mcpServers.next.command).toBe('node')
       expect(saved.models[0].id).toBe('keep')
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts pasted MCP config with missing trailing braces', async () => {
+    const cwd = await tempProject()
+    try {
+      const result = await mergeProjectMcpServers(cwd, `{
+        "mcpServers": {
+          "chrome-devtools": {
+            "command": "npx",
+            "args": ["-y", "chrome-devtools-mcp@latest"]
+          }
+        }
+      `)
+      const saved = JSON.parse(await readFile(join(cwd, '.microcode', 'config.json'), 'utf-8'))
+
+      expect(result.names).toEqual(['chrome-devtools'])
+      expect(saved.mcpServers['chrome-devtools'].command).toBe('npx')
+      expect(saved.mcpServers['chrome-devtools'].args).toEqual(['-y', 'chrome-devtools-mcp@latest'])
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }

@@ -30,10 +30,47 @@ async function writeProjectConfig(path: string, config: ProjectConfig): Promise<
   await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, 'utf-8')
 }
 
+function appendMissingJsonClosers(raw: string): string | undefined {
+  const stack: string[] = []
+  let quote: '"' | undefined
+  let escaping = false
+
+  for (const char of raw) {
+    if (escaping) {
+      escaping = false
+      continue
+    }
+    if (char === '\\' && quote) {
+      escaping = true
+      continue
+    }
+    if (char === '"') {
+      quote = quote ? undefined : '"'
+      continue
+    }
+    if (quote) continue
+    if (char === '{') stack.push('}')
+    else if (char === '[') stack.push(']')
+    else if (char === '}' || char === ']') {
+      if (stack.at(-1) !== char) return undefined
+      stack.pop()
+    }
+  }
+
+  if (quote || stack.length === 0) return undefined
+  return `${raw.trimEnd()}${stack.reverse().join('')}`
+}
+
 function parseJson(raw: string): unknown {
   try {
     return JSON.parse(raw)
   } catch (error) {
+    const repaired = appendMissingJsonClosers(raw)
+    if (repaired) {
+      try {
+        return JSON.parse(repaired)
+      } catch {}
+    }
     throw new Error(`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
