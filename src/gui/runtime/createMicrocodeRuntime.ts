@@ -1,7 +1,7 @@
 import type { AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { Api, ImageContent, Model } from '@earendil-works/pi-ai'
 import { homedir } from 'os'
-import { join } from 'path'
+import { isAbsolute, join, resolve } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { createMicrocodeAgentRuntime, type MicrocodeAgent, type MicrocodeAgentEvent } from '../../agent/index.ts'
 import { getAllModels, getCustomModelDefs, resolveApiKey } from '../../models/index.ts'
@@ -24,6 +24,8 @@ import {
   SEND_AGENT_MESSAGE_TOOL_NAME,
   STOP_AGENT_TOOL_NAME,
 } from '../../tools/index.ts'
+import { TOOL_NAME as WRITE_TOOL_NAME } from '../../tools/FileWriteTool/FileWriteTool.ts'
+import { TOOL_NAME as EDIT_TOOL_NAME } from '../../tools/FileEditTool/FileEditTool.ts'
 import { type PermissionMode } from '../../permissions/index.ts'
 import {
   collectImagePathsFromText,
@@ -172,6 +174,210 @@ function extractMessageBlocks(message: AgentMessage): GuiMessageBlock[] {
   return blocks
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function extractToolCalls(message: AgentMessage): Array<{
+  id: string
+  name: string
+  args: Record<string, unknown>
+}> {
+  if (message.role !== 'assistant') return []
+  const content = (message as any).content
+  if (!Array.isArray(content)) return []
+  const calls = []
+  for (const block of content) {
+    if (block?.type !== 'toolCall') continue
+    const id = typeof block.id === 'string' ? block.id : ''
+    const name = typeof block.name === 'string' ? block.name : ''
+    if (!id || !name) continue
+    calls.push({
+      id,
+      name,
+      args: asRecord(block.arguments),
+    })
+  }
+  return calls
+}
+
+export function extractStreamingToolCalls(
+  message: AgentMessage,
+  fallbackPrefix = 'streaming-tool',
+): Array<{
+  id: string
+  actualId?: string
+  fallbackId: string
+  name: string
+  args: Record<string, unknown>
+}> {
+  if (message.role !== 'assistant') return []
+  const content = (message as any).content
+  if (!Array.isArray(content)) return []
+  const calls = []
+  for (let index = 0; index < content.length; index++) {
+    const block = content[index]
+    if (block?.type !== 'toolCall') continue
+    const actualId = typeof block.id === 'string' && block.id ? block.id : undefined
+    const fallbackId = `${fallbackPrefix}-${index}`
+    const name = typeof block.name === 'string' && block.name ? block.name : 'tool'
+    calls.push({
+      id: actualId ?? fallbackId,
+      actualId,
+      fallbackId,
+      name,
+      args: getToolCallArgs(block),
+    })
+  }
+  return calls
+}
+
+function getToolCallArgs(block: Record<string, unknown>): Record<string, unknown> {
+  const args = asRecord(block.arguments)
+  if (Object.keys(args).length > 0) return args
+
+  const partial = typeof block.partialArgs === 'string'
+    ? block.partialArgs
+    : typeof block.partialJson === 'string'
+      ? block.partialJson
+      : undefined
+  if (!partial) return {}
+
+  try {
+    return asRecord(JSON.parse(partial))
+  } catch {
+    return {}
+  }
+}
+
+function createRestoredToolItem(
+  toolCallId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  startedAt?: number,
+): GuiToolItem {
+  return {
+    id: makeId('tool'),
+    kind: 'tool',
+    toolCallId,
+    toolName,
+    args,
+    status: 'pending',
+    statusText: formatToolStatusSafe(toolName, args),
+    startedAt,
+  }
+}
+
+function countStreamingLines(content: string): number {
+  if (!content) return 0
+  let lines = 1
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) === 10) lines++
+  }
+  return content.endsWith('\n') ? lines - 1 : lines
+}
+
+export function getStreamingToolDetails(
+  toolName: string,
+  args: Record<string, unknown>,
+  cwd = process.cwd(),
+): Record<string, unknown> | undefined {
+  if (toolName === WRITE_TOOL_NAME) {
+    const filePath = typeof args.file_path === 'string' ? args.file_path : ''
+    const content = typeof args.content === 'string' ? args.content : ''
+    const resolvedPath = filePath
+      ? (isAbsolute(filePath) ? filePath : resolve(cwd, filePath))
+      : ''
+    return {
+      path: resolvedPath || filePath,
+      bytesWritten: Buffer.byteLength(content, 'utf8'),
+      additions: countStreamingLines(content),
+      removals: 0,
+      isNewFile: resolvedPath ? !existsSync(resolvedPath) : false,
+      phase: 'preparing',
+    }
+  }
+
+  if (toolName === EDIT_TOOL_NAME) {
+    const oldString = typeof args.old_string === 'string' ? args.old_string : ''
+    const newString = typeof args.new_string === 'string' ? args.new_string : ''
+    return {
+      path: typeof args.file_path === 'string' ? args.file_path : '',
+      additions: countStreamingLines(newString),
+      removals: countStreamingLines(oldString),
+      replacements: args.replace_all === true ? 0 : 1,
+      phase: 'preparing',
+    }
+  }
+
+  return undefined
+}
+
+export function restoreGuiTimelineFromMessages(messages: readonly AgentMessage[]): GuiChatItem[] {
+  const timeline: GuiChatItem[] = []
+  const pendingTools = new Map<string, GuiToolItem>()
+
+  for (const message of messages) {
+    if ((message as any).display === false) continue
+
+    if (message.role === 'user' || message.role === 'assistant') {
+      timeline.push({
+        id: makeId(message.role),
+        kind: 'message',
+        role: message.role,
+        blocks: extractMessageBlocks(message),
+        createdAt: (message as any).timestamp ?? Date.now(),
+      })
+
+      for (const toolCall of extractToolCalls(message)) {
+        const item = createRestoredToolItem(
+          toolCall.id,
+          toolCall.name,
+          toolCall.args,
+          (message as any).timestamp,
+        )
+        pendingTools.set(toolCall.id, item)
+        timeline.push(item)
+      }
+      continue
+    }
+
+    if (message.role === 'toolResult') {
+      const toolCallId = String((message as any).toolCallId ?? '')
+      if (!toolCallId) continue
+      const toolName = String((message as any).toolName ?? 'tool')
+      let item = pendingTools.get(toolCallId)
+      if (!item) {
+        item = createRestoredToolItem(toolCallId, toolName, {}, (message as any).timestamp)
+        timeline.push(item)
+      }
+
+      const result = {
+        content: Array.isArray((message as any).content) ? (message as any).content : [],
+        details: asRecord((message as any).details),
+        isError: Boolean((message as any).isError),
+      }
+      const finishedAt = (message as any).timestamp ?? Date.now()
+      Object.assign(item, {
+        toolName,
+        status: result.isError ? 'error' : 'complete',
+        finishedAt,
+        output: getTextFromToolResult(result),
+        statusText: formatToolStatusSafe(toolName, item.args, result.details),
+        summary: formatToolSummarySafe(toolName, result, item.args),
+        details: result.details,
+        isError: result.isError,
+      } satisfies Partial<GuiToolItem>)
+      if (item.startedAt && item.finishedAt) item.elapsedMs = item.finishedAt - item.startedAt
+      pendingTools.delete(toolCallId)
+    }
+  }
+
+  return timeline
+}
+
 function parseQuestions(input: Record<string, unknown>): GuiQuestion[] {
   const questions = Array.isArray(input.questions) ? input.questions : []
   return questions.map((raw) => {
@@ -218,6 +424,7 @@ export class MicrocodeRuntime {
   private pendingTools = new Map<string, GuiToolItem>()
   private lastToolUpdateAt = new Map<string, number>()
   private completionTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private streamingToolAliases = new Map<string, string>()
   private pendingPermissions = new Map<string, PendingPermission>()
   private pendingQuestions = new Map<string, PendingQuestion>()
   private mcpServers = [] as ReturnType<McpClientManager['getServerStates']>
@@ -405,6 +612,7 @@ export class MicrocodeRuntime {
     this.agent.replaceMessages(messages, 'rebuild')
     this.timeline.length = 0
     this.pendingTools.clear()
+    this.streamingToolAliases.clear()
     this.clearToolTimers()
     this.streamingMessageId = undefined
     this.pendingAssistantMessageId = undefined
@@ -427,6 +635,7 @@ export class MicrocodeRuntime {
     this.agent.clearMessages()
     this.timeline.length = 0
     this.pendingTools.clear()
+    this.streamingToolAliases.clear()
     this.clearToolTimers()
     this.streamingMessageId = undefined
     this.pendingAssistantMessageId = undefined
@@ -837,18 +1046,21 @@ export class MicrocodeRuntime {
               createdAt: Date.now(),
             })
           }
+          this.updateStreamingToolCalls(event.message)
           this.emitTimeline()
         }
         break
       case 'message_update':
         if (event.message.role === 'assistant') {
           this.updateStreamingMessage(event.message)
+          this.updateStreamingToolCalls(event.message)
           this.emitTimeline()
         }
         break
       case 'message_end':
         if (event.message.role === 'assistant') {
           this.updateStreamingMessage(event.message, false)
+          this.updateStreamingToolCalls(event.message)
           this.streamingMessageId = undefined
           this.pendingAssistantMessageId = undefined
           this.emitTimeline()
@@ -911,17 +1123,7 @@ export class MicrocodeRuntime {
   }
 
   private restoreTimelineFromMessages(messages: readonly AgentMessage[]): void {
-    for (const message of messages) {
-      if ((message as any).display === false) continue
-      if (message.role !== 'user' && message.role !== 'assistant') continue
-      this.timeline.push({
-        id: makeId(message.role),
-        kind: 'message',
-        role: message.role,
-        blocks: extractMessageBlocks(message),
-        createdAt: (message as any).timestamp ?? Date.now(),
-      })
-    }
+    this.timeline.push(...restoreGuiTimelineFromMessages(messages))
   }
 
   private updateStreamingMessage(message: AgentMessage, streaming = true): void {
@@ -933,6 +1135,53 @@ export class MicrocodeRuntime {
     item.streaming = streaming
     item.stopReason = (message as any).stopReason
     item.errorMessage = (message as any).errorMessage
+  }
+
+  private updateStreamingToolCalls(message: AgentMessage): void {
+    const fallbackPrefix = this.streamingMessageId ?? this.pendingAssistantMessageId ?? 'assistant'
+    for (const toolCall of extractStreamingToolCalls(message, fallbackPrefix)) {
+      if (toolCall.actualId && toolCall.actualId !== toolCall.fallbackId) {
+        this.streamingToolAliases.set(toolCall.fallbackId, toolCall.actualId)
+      }
+
+      let item = this.pendingTools.get(toolCall.id)
+      const fallbackItem = toolCall.actualId ? this.pendingTools.get(toolCall.fallbackId) : undefined
+      if (!item && fallbackItem) {
+        item = fallbackItem
+        this.pendingTools.delete(toolCall.fallbackId)
+        this.pendingTools.set(toolCall.id, item)
+        item.toolCallId = toolCall.id
+      }
+
+      if (!item) {
+        item = {
+          id: makeId('tool'),
+          kind: 'tool',
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          args: toolCall.args,
+          status: 'pending',
+          statusText: formatToolStatusSafe(toolCall.name, toolCall.args),
+          startedAt: Date.now(),
+        }
+        this.pendingTools.set(toolCall.id, item)
+        this.timeline.push(item)
+      } else {
+        item.toolName = toolCall.name
+        item.args = toolCall.args
+        item.statusText = formatToolStatusSafe(toolCall.name, toolCall.args, item.details)
+      }
+
+      const streamingDetails = getStreamingToolDetails(toolCall.name, toolCall.args, this.cwd)
+      const currentPhase = typeof item.details?.phase === 'string' ? item.details.phase : undefined
+      if (streamingDetails && (item.status === 'pending' || currentPhase === 'preparing' || currentPhase === undefined)) {
+        item.details = {
+          ...item.details,
+          ...streamingDetails,
+        }
+        item.statusText = formatToolStatusSafe(toolCall.name, toolCall.args, item.details)
+      }
+    }
   }
 
   private finishPendingAssistantError(message: string): void {
@@ -951,6 +1200,32 @@ export class MicrocodeRuntime {
 
   private upsertTool(toolCallId: string, patch: Omit<Partial<GuiToolItem>, 'kind' | 'id'> & { toolCallId: string; toolName: string; args: Record<string, unknown> }): void {
     let item = this.pendingTools.get(toolCallId)
+    if (!item) {
+      const alias = [...this.streamingToolAliases.entries()]
+        .find(([, actualId]) => actualId === toolCallId)?.[0]
+      if (alias) {
+        item = this.pendingTools.get(alias)
+        if (item) {
+          this.pendingTools.delete(alias)
+          this.pendingTools.set(toolCallId, item)
+          item.toolCallId = toolCallId
+        }
+      }
+    }
+    if (!item) {
+      const streamingMatch = [...this.pendingTools.entries()].find(([, candidate]) =>
+        candidate.status === 'pending' &&
+        (candidate.toolName === patch.toolName || candidate.toolName === 'tool')
+      )
+      if (streamingMatch) {
+        const [streamingId, candidate] = streamingMatch
+        this.pendingTools.delete(streamingId)
+        this.streamingToolAliases.set(streamingId, toolCallId)
+        item = candidate
+        item.toolCallId = toolCallId
+        this.pendingTools.set(toolCallId, item)
+      }
+    }
     if (!item) {
       item = {
         id: makeId('tool'),
