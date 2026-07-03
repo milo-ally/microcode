@@ -18,6 +18,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   const [modelConfigText, setModelConfigText] = useState('')
   const [configBusy, setConfigBusy] = useState<'mcp' | 'model' | null>(null)
   const [configError, setConfigError] = useState<string | undefined>()
+  const [configSuccess, setConfigSuccess] = useState<string | undefined>()
 
   if (!snapshot) {
     return React.createElement('aside', { className: 'sidebar' },
@@ -128,9 +129,11 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   if (view === 'mcp') {
     const submitMcpConfig = () => {
       setConfigError(undefined)
+      setConfigSuccess(undefined)
       setConfigBusy('mcp')
-      void window.microcode.addMcpConfig(mcpConfigText).then(() => {
+      void window.microcode.addMcpConfig(mcpConfigText).then((result) => {
         setMcpConfigText('')
+        setConfigSuccess(`Added ${result.names.join(', ')} to ${result.path}`)
       }).catch((error) => {
         setConfigError(error instanceof Error ? error.message : String(error))
       }).finally(() => setConfigBusy(null))
@@ -145,6 +148,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
           onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setMcpConfigText(event.currentTarget.value),
         }),
         configError && React.createElement('div', { className: 'config-error' }, configError),
+        configSuccess && React.createElement('div', { className: 'config-success' }, configSuccess),
         React.createElement('button', {
           className: 'wide-action',
           disabled: configBusy !== null || !mcpConfigText.trim(),
@@ -237,9 +241,11 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
   if (view === 'settings') {
     const submitModelConfig = () => {
       setConfigError(undefined)
+      setConfigSuccess(undefined)
       setConfigBusy('model')
-      void window.microcode.addModelConfig(modelConfigText).then(() => {
+      void window.microcode.addModelConfig(modelConfigText).then((result) => {
         setModelConfigText('')
+        setConfigSuccess(`Added ${result.names.join(', ')} to ${result.path}`)
       }).catch((error) => {
         setConfigError(error instanceof Error ? error.message : String(error))
       }).finally(() => setConfigBusy(null))
@@ -293,6 +299,7 @@ export function Sidebar({ view, snapshot, setView, onToggleCollapse }: {
           onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setModelConfigText(event.currentTarget.value),
         }),
         configError && React.createElement('div', { className: 'config-error' }, configError),
+        configSuccess && React.createElement('div', { className: 'config-success' }, configSuccess),
         React.createElement('button', {
           className: 'wide-action',
           disabled: configBusy !== null || !modelConfigText.trim(),

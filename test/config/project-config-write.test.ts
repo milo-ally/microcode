@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { mergeProjectMcpServers, mergeProjectModels } from '../../src/config/projectConfigWrite.ts'
@@ -10,9 +10,10 @@ async function tempProject(): Promise<string> {
 
 describe('project config writes', () => {
   test('merges pasted MCP servers without dropping existing config keys', async () => {
-    const cwd = await tempProject()
+      const cwd = await tempProject()
     try {
       const configPath = join(cwd, '.microcode', 'config.json')
+      await mkdir(join(cwd, '.microcode'), { recursive: true })
       await writeFile(configPath, JSON.stringify({
         models: [{ id: 'keep', name: 'Keep', api: 'openai-completions', baseUrl: 'https://keep.test', contextWindow: 1000, maxTokens: 100 }],
         mcpServers: { old: { command: 'old' } },

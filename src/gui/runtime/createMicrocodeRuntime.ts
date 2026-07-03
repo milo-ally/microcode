@@ -894,7 +894,6 @@ export class MicrocodeRuntime {
   async addMcpConfig(rawJson: string) {
     const result = await mergeProjectMcpServers(this.cwd, rawJson)
     await this.reloadMcpServers()
-    this.addNotice('success', `Added MCP config: ${result.names.join(', ')}`)
     this.emitSnapshot()
     return result
   }
@@ -903,7 +902,6 @@ export class MicrocodeRuntime {
     const result = await mergeProjectModels(this.cwd, rawJson)
     resetCustomModelCache()
     await this.refreshDerivedState()
-    this.addNotice('success', `Added model config: ${result.names.join(', ')}`)
     this.emitSnapshot()
     return result
   }

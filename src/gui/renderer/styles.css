@@ -616,6 +616,17 @@ button {
   padding: 7px 8px;
 }
 
+.config-success {
+  border: 1px solid rgba(181, 189, 104, 0.35);
+  border-radius: 6px;
+  background: rgba(181, 189, 104, 0.08);
+  color: #b5bd68;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  padding: 7px 8px;
+}
+
 .task-state-pill.done {
   border-color: #2f3e32;
   color: #b5bd68;
