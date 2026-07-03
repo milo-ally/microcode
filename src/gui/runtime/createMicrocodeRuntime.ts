@@ -157,10 +157,32 @@ function formatToolSummarySafe(
   }
 }
 
+export function sanitizeAssistantDisplayText(text: string): string {
+  let cleaned = text.replace(/<agent-results\b[^>]*>[\s\S]*?<\/agent-results>/gi, '').trim()
+  if (!cleaned) cleaned = text.trim()
+
+  if (/^task-[^\s]+\s+agent-[^\s]+\s+(completed|blocked|failed|cancelled|interrupted)\b/i.test(cleaned)) {
+    const horizontalRule = cleaned.match(/\n\s*-{3,}\s*\n/)
+    if (horizontalRule?.index !== undefined) {
+      cleaned = cleaned.slice(horizontalRule.index + horizontalRule[0].length).trim()
+    } else {
+      const heading = cleaned.match(/\n\s{0,3}#{1,6}\s+\S/)
+      if (heading?.index !== undefined) {
+        cleaned = cleaned.slice(heading.index).trim()
+      }
+    }
+  }
+
+  return cleaned
+}
+
 function extractMessageBlocks(message: AgentMessage): GuiMessageBlock[] {
   const content = (message as any).content
+  const sanitizeText = (value: string) =>
+    message.role === 'assistant' ? sanitizeAssistantDisplayText(value) : value
   if (typeof content === 'string') {
-    return content ? [{ type: 'text', text: content }] : []
+    const text = sanitizeText(content)
+    return text ? [{ type: 'text', text }] : []
   }
   if (!Array.isArray(content)) {
     return []
@@ -168,7 +190,8 @@ function extractMessageBlocks(message: AgentMessage): GuiMessageBlock[] {
   const blocks: GuiMessageBlock[] = []
   for (const block of content) {
     if (block?.type === 'text') {
-      blocks.push({ type: 'text', text: String(block.text ?? '') })
+      const text = sanitizeText(String(block.text ?? ''))
+      if (text) blocks.push({ type: 'text', text })
     } else if (block?.type === 'thinking') {
       blocks.push({ type: 'thinking', thinking: String(block.thinking ?? '') })
     } else if (block?.type === 'image' || block?.type === 'image_url') {

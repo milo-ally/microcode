@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { AgentRegistry } from '../../src/swarm/AgentRegistry.ts'
 import { AgentTaskStore } from '../../src/swarm/AgentTaskStore.ts'
+import { extractWorkerResult } from '../../src/swarm/AgentSupervisor.ts'
 
 describe('swarm modules', () => {
   test('agent registry stores unique agents and removes by id', () => {
@@ -29,5 +30,30 @@ describe('swarm modules', () => {
 
     store.restore([{ ...store.get('task-2')!, status: 'running' as const } as any])
     expect(store.get('task-2')?.status).toBe('interrupted')
+  })
+
+  test('worker result uses the final assistant answer without internal tool summaries', () => {
+    const result = extractWorkerResult([
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'I will search first.' }],
+      },
+      {
+        role: 'toolResult',
+        toolName: 'WebSearch',
+        toolCallId: 'call-1',
+        content: [{ type: 'text', text: 'raw search result' }],
+        details: { query: 'LangChain4j' },
+        isError: false,
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: '# Final\n\nUse LangChain4j AiServices.' }],
+      },
+    ] as any)
+
+    expect(result).toBe('# Final\n\nUse LangChain4j AiServices.')
+    expect(result).not.toContain('WebSearch')
+    expect(result).not.toContain('I will search first.')
   })
 })

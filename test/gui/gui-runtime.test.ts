@@ -4,6 +4,7 @@ import {
   extractStreamingToolCalls,
   getStreamingToolDetails,
   restoreGuiTimelineFromMessages,
+  sanitizeAssistantDisplayText,
   upsertGuiCompactionItem,
 } from '../../src/gui/runtime/createMicrocodeRuntime.ts'
 import type { GuiChatItem } from '../../src/gui/shared/types.ts'
@@ -189,5 +190,21 @@ describe('GUI runtime timeline restore', () => {
       tokensAfter: 9459,
       updatedAt: 1500,
     })
+  })
+
+  test('strips leaked worker metadata from assistant display text', () => {
+    const text = [
+      'task-d0b88513-3ab5-47d5-a3b5-0ae2857625c7 agent-2f2c4412-f59c-4bae-8f4d-615f1ef1a95b completed I searched with WebSearch and WebFetch.',
+      '[WebSearch] query="LangChain4j" · 8 results',
+      '',
+      '---',
+      '',
+      '# LangChain4j 概述',
+      '',
+      '真正给用户看的内容。',
+    ].join('\n')
+
+    const cleaned = sanitizeAssistantDisplayText(text)
+    expect(cleaned).toBe('# LangChain4j 概述\n\n真正给用户看的内容。')
   })
 })

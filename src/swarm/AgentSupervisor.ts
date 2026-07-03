@@ -1,5 +1,5 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
-import type { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai'
+import type { AssistantMessage } from '@earendil-works/pi-ai'
 import type { MicrocodeAgent } from '../agent/index.ts'
 import type {
   GitWorkTreeMergeResult,
@@ -13,7 +13,6 @@ import type { PermissionMode as _PermissionMode } from '../permissions/index.ts'
 import {
   formatToolActivity,
   formatToolDetail,
-  formatToolSummary,
   formatToolStatus,
 } from '../tools/registry.ts'
 import type {
@@ -33,27 +32,17 @@ function createId(prefix: string): string {
 }
 
 export function extractWorkerResult(messages: readonly AgentMessage[]): string {
-  const parts: string[] = []
-
-  for (const message of messages) {
-    if (message.role === 'assistant') {
-      const text = (message as AssistantMessage).content
-        .filter((block) => block.type === 'text')
-        .map((block) => block.text)
-        .join('\n')
-        .trim()
-      if (text) parts.push(text)
-    } else if (message.role === 'toolResult') {
-      const toolResult = message as ToolResultMessage
-      parts.push(formatToolSummary(toolResult.toolName, {
-        content: toolResult.content,
-        details: toolResult.details,
-        isError: toolResult.isError,
-      }))
-    }
+  for (const message of [...messages].reverse()) {
+    if (message.role !== 'assistant') continue
+    const text = (message as AssistantMessage).content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n')
+      .trim()
+    if (text) return text
   }
 
-  return parts.join('\n').trim()
+  return ''
 }
 
 export interface AgentSupervisorOptions {
@@ -852,10 +841,9 @@ export class AgentSupervisor {
           '      </blocker>'
         ).join('\n')}\n    </blockers>`
       : ''
-    return `  <agent-result>\n    <task-id>${this.xmlEscape(task.id)}</task-id>\n` +
-      `    <agent-id>${this.xmlEscape(task.agentId)}</agent-id>\n` +
+    return `  <agent-result>\n` +
+      `    <description>${this.xmlEscape(task.description)}</description>\n` +
       `    <status>${task.status}</status>${result}${error}${blockers}\n` +
-      `    <usage tokens="${task.usage.tokens}" tool-calls="${task.usage.toolCalls}" />\n` +
       '  </agent-result>'
   }
 
