@@ -539,10 +539,10 @@ export class MicrocodeRuntime {
       if (targetSession) {
         restoredMessages = await sessionManager.open(targetSession)
       } else {
-        await sessionManager.create(cwd)
+        sessionManager.beginDraft(cwd)
       }
     } else {
-      await sessionManager.create(cwd)
+      sessionManager.beginDraft(cwd)
     }
 
     const worktreeSystem = await GitWorkTreeSystem.open(cwd)
@@ -704,7 +704,7 @@ export class MicrocodeRuntime {
     }
     await this.agent.persistMessages()
     await this.supervisor.prepareSessionSwitch()
-    await this.sessionManager.create(this.cwd)
+    this.sessionManager.beginDraft(this.cwd)
     await this.supervisor.restore()
     this.agent.clearMessages()
     this.timeline.length = 0
@@ -715,7 +715,7 @@ export class MicrocodeRuntime {
     this.pendingAssistantMessageId = undefined
     this.titleGenerated = false
     await this.refreshDerivedState()
-    this.addNotice('success', `New session created: ${this.sessionManager.getSessionId()?.slice(0, 8)}`)
+    this.addNotice('success', 'New session ready.')
     this.emitTimeline()
   }
 
@@ -724,6 +724,9 @@ export class MicrocodeRuntime {
     const paths = input.imagePaths?.length ? input.imagePaths : collectImagePathsFromText(text)
     const cleanText = stripImagePathsFromText(text)
     const images: ImageContent[] = []
+
+    if (!cleanText.trim() && paths.length === 0) return
+    await this.sessionManager.ensureCreated(this.cwd)
 
     if (paths.length > 0) {
       if (!modelSupportsImages(this.agent.getCurrentModel())) {

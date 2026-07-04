@@ -283,6 +283,7 @@ export class App {
 
       if (imagePaths.length > 0) {
         if (modelSupportsImages(this.agent.getCurrentModel())) {
+          await this.sessionManager.ensureCreated(process.cwd())
           for (const filePath of imagePaths) {
             const image = tryReadImageFromPath(filePath)
             if (image) {
@@ -303,6 +304,7 @@ export class App {
       // Skip if nothing to send (no text and no images)
       const images = this.getPendingImageContents()
       if (!userInput.trim() && images.length === 0) continue
+      await this.sessionManager.ensureCreated(process.cwd())
 
       // Add user message to chat (with grey background)
       this.chatContainer.addChild(new UserMessage(userInput, images.length > 0 ? images : undefined))
@@ -1399,9 +1401,7 @@ export class App {
     await this.agent.persistMessages()
     await this.supervisor?.prepareSessionSwitch()
 
-    // Create new session
-    const cwd = process.cwd()
-    await this.sessionManager.create(cwd)
+    this.sessionManager.beginDraft(process.cwd())
     await this.supervisor?.restore()
 
     // Reset state
@@ -1412,9 +1412,8 @@ export class App {
 
     // Clear chat and show confirmation
     this.chatContainer.clear()
-    const newId = this.sessionManager.getSessionId()
     this.chatContainer.addChild(
-      new Text(theme.fg('accent', `New session created: ${newId?.slice(0, 8)}`), 1, 0),
+      new Text(theme.fg('accent', 'New session ready.'), 1, 0),
     )
     this.chatContainer.addChild(new Spacer(1))
     this.ui.requestRender()

@@ -39,6 +39,8 @@ export class SessionManager implements AgentSessionPersistence {
   private repo: JsonlSessionRepo
   private session: Session | null = null
   private metadata: JsonlSessionMetadata | null = null
+  private draftCwd: string | null = null
+  private createPromise: Promise<string> | null = null
   private savedMessageCount = 0
   private titleCache: Map<string, string> | null = null
   private readonly taskSystem: TaskSystem
@@ -61,8 +63,38 @@ export class SessionManager implements AgentSessionPersistence {
   async create(cwd: string): Promise<string> {
     this.session = await this.repo.create({ cwd })
     this.metadata = await this.session.getMetadata() as JsonlSessionMetadata
+    this.draftCwd = null
     this.savedMessageCount = 0
     return this.metadata.id
+  }
+
+  /**
+   * Start a new in-memory session without writing anything to disk yet.
+   */
+  beginDraft(cwd: string): void {
+    this.session = null
+    this.metadata = null
+    this.draftCwd = cwd
+    this.savedMessageCount = 0
+  }
+
+  /**
+   * Materialize the current draft session only when durable state is needed.
+   */
+  async ensureCreated(cwd?: string): Promise<string> {
+    if (this.metadata?.id) return this.metadata.id
+    const targetCwd = cwd ?? this.draftCwd
+    if (!targetCwd) throw new Error('No active session.')
+    if (!this.createPromise) {
+      this.createPromise = this.create(targetCwd).finally(() => {
+        this.createPromise = null
+      })
+    }
+    return this.createPromise
+  }
+
+  isDraft(): boolean {
+    return !this.metadata && Boolean(this.draftCwd)
   }
 
   /**
@@ -71,6 +103,7 @@ export class SessionManager implements AgentSessionPersistence {
   async open(meta: JsonlSessionMetadata): Promise<AgentMessage[]> {
     this.session = await this.repo.open(meta)
     this.metadata = meta
+    this.draftCwd = null
     const context = await this.session.buildContext()
     this.savedMessageCount = context.messages.length
     return context.messages
@@ -96,6 +129,10 @@ export class SessionManager implements AgentSessionPersistence {
    * Only appends messages that haven't been saved yet.
    */
   async saveMessages(messages: readonly AgentMessage[]): Promise<void> {
+    if (!this.session) {
+      if (messages.length === 0) return
+      await this.ensureCreated()
+    }
     if (!this.session) return
 
     // Append only new messages, with image blocks replaced by text references
@@ -159,30 +196,35 @@ export class SessionManager implements AgentSessionPersistence {
   }
 
   async createTaskList(title: string, tasks: readonly string[]): Promise<TaskList> {
-    return this.taskSystem.createList(this.requireSessionId(), title, tasks)
+    const sessionId = await this.ensureCreated()
+    return this.taskSystem.createList(sessionId, title, tasks)
   }
 
   async listTaskLists(): Promise<TaskList[]> {
-    return this.taskSystem.listTaskLists(this.requireSessionId())
+    const sessionId = this.getSessionId()
+    if (!sessionId) return []
+    return this.taskSystem.listTaskLists(sessionId)
   }
 
   async getTaskReminder(): Promise<string | undefined> {
-    return this.taskSystem.getReminder(this.requireSessionId())
+    const sessionId = this.getSessionId()
+    if (!sessionId) return undefined
+    return this.taskSystem.getReminder(sessionId)
   }
 
   async claimTaskList(listId: string): Promise<TaskList> {
-    return this.taskSystem.claimTaskList(this.requireSessionId(), listId)
+    return this.taskSystem.claimTaskList(await this.ensureCreated(), listId)
   }
 
   async remindTask(listId: string, taskId: string, reminder = true): Promise<TaskList> {
-    return this.taskSystem.remindTask(this.requireSessionId(), listId, taskId, reminder)
+    return this.taskSystem.remindTask(await this.ensureCreated(), listId, taskId, reminder)
   }
 
   async remindTasks(
     listId: string,
     tasks: readonly TaskReminderUpdate[],
   ): Promise<TaskList> {
-    return this.taskSystem.remindTasks(this.requireSessionId(), listId, tasks)
+    return this.taskSystem.remindTasks(await this.ensureCreated(), listId, tasks)
   }
 
   async markTask(
@@ -192,7 +234,7 @@ export class SessionManager implements AgentSessionPersistence {
     pending?: boolean,
   ): Promise<TaskList> {
     return this.taskSystem.markTask(
-      this.requireSessionId(),
+      await this.ensureCreated(),
       listId,
       taskId,
       completed,
@@ -204,7 +246,7 @@ export class SessionManager implements AgentSessionPersistence {
     list_id?: string
     tasks: readonly TaskMarkUpdate[]
   }): Promise<TaskList> {
-    return this.taskSystem.markTasks(this.requireSessionId(), input)
+    return this.taskSystem.markTasks(await this.ensureCreated(), input)
   }
 
   private requireSessionId(): string {
@@ -218,6 +260,7 @@ export class SessionManager implements AgentSessionPersistence {
     batches: readonly AgentBatch[] = [],
     agentMetas: readonly AgentMeta[] = [],
   ): Promise<void> {
+    await this.ensureCreated()
     return this.withManifestLock(() => this.writeManifestUnsafe(tasks, batches, agentMetas))
   }
 
@@ -248,6 +291,7 @@ export class SessionManager implements AgentSessionPersistence {
   }
 
   async loadAgentManifest(): Promise<{ tasks: AgentTask[]; batches?: AgentBatch[]; agentMetas?: AgentMeta[] }> {
+    if (!this.getSessionId()) return { tasks: [] }
     const file = path.join(this.getAgentSessionDir(), 'manifest.json')
     try {
       const parsed = JSON.parse(await readFile(file, 'utf8')) as {
@@ -268,6 +312,7 @@ export class SessionManager implements AgentSessionPersistence {
   }
 
   async loadAgentBatches(): Promise<AgentBatch[]> {
+    if (!this.getSessionId()) return []
     const file = path.join(this.getAgentSessionDir(), 'manifest.json')
     try {
       const parsed = JSON.parse(await readFile(file, 'utf8')) as {
@@ -284,6 +329,7 @@ export class SessionManager implements AgentSessionPersistence {
     agentId: string,
     messages: readonly AgentMessage[],
   ): Promise<void> {
+    await this.ensureCreated()
     if (!/^[a-zA-Z0-9._-]+$/.test(agentId)) {
       throw new Error('Invalid agent ID.')
     }
@@ -299,6 +345,7 @@ export class SessionManager implements AgentSessionPersistence {
   }
 
   async loadAgentTranscript(agentId: string): Promise<AgentMessage[]> {
+    if (!this.getSessionId()) return []
     if (!/^[a-zA-Z0-9._-]+$/.test(agentId)) {
       throw new Error('Invalid agent ID.')
     }
@@ -399,6 +446,7 @@ export class SessionManager implements AgentSessionPersistence {
   async switchToSession(meta: JsonlSessionMetadata): Promise<AgentMessage[]> {
     this.session = await this.repo.open(meta)
     this.metadata = meta
+    this.draftCwd = null
     const context = await this.session.buildContext()
     this.savedMessageCount = context.messages.length
     return context.messages

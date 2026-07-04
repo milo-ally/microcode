@@ -292,14 +292,14 @@ Session Management:
         console.log(`Resumed session: ${targetSession.id.slice(0, 8)}`)
       } catch (error) {
         console.error(`Failed to resume session: ${error instanceof Error ? error.message : String(error)}`)
-        await sessionManager.create(cwd)
+        sessionManager.beginDraft(cwd)
       }
     } else {
       console.log('No previous session found. Starting new session.')
-      await sessionManager.create(cwd)
+      sessionManager.beginDraft(cwd)
     }
   } else {
-    await sessionManager.create(cwd)
+    sessionManager.beginDraft(cwd)
   }
 
   // Create MCP client and agent without waiting for MCP servers
