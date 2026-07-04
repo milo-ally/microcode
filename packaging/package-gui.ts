@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { copyFile } from 'fs/promises'
 import { join } from 'path'
 import {
   archiveDirectory,
@@ -55,6 +56,7 @@ async function writeLaunchers(packageDir: string): Promise<void> {
       'Name=Microcode',
       'Comment=AI-powered coding assistant',
       'Exec=./microcode-gui',
+      'Icon=./microcode.png',
       'Terminal=false',
       'Categories=Development;',
       '',
@@ -76,6 +78,21 @@ async function main(): Promise<void> {
   await copyDir(join(projectRoot, 'dist', 'gui', 'electron'), join(appDir, 'electron'))
   await copyDir(join(projectRoot, 'dist', 'gui', 'preload'), join(appDir, 'preload'))
   await copyDir(join(projectRoot, 'dist', 'gui', 'renderer'), join(appDir, 'renderer'))
+  await copyFile(
+    join(projectRoot, 'assets', 'logo', 'generated', 'microcode.png'),
+    join(packageDir, 'microcode.png'),
+  )
+
+  if (process.platform === 'darwin') {
+    try {
+      await copyFile(
+        join(projectRoot, 'assets', 'logo', 'generated', 'Microcode.icns'),
+        join(packageDir, 'electron', 'Electron.app', 'Contents', 'Resources', 'electron.icns'),
+      )
+    } catch {
+      // iconutil is macOS-only; portable packaging still works without the icns.
+    }
+  }
 
   await Bun.write(join(appDir, 'package.json'), JSON.stringify({
     name: 'microcode-gui',

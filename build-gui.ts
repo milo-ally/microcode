@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
-import { mkdir, copyFile, rename, rm } from 'fs/promises'
+import { mkdir, copyFile, cp, rename, rm } from 'fs/promises'
 import { join } from 'path'
 
 const root = import.meta.dir
 const outDir = join(root, 'dist', 'gui')
 const rendererOut = join(outDir, 'renderer')
 const electronOut = join(outDir, 'electron')
+const logoAssets = join(root, 'assets', 'logo')
 
 async function build() {
   await rm(outDir, { recursive: true, force: true })
@@ -61,6 +62,9 @@ async function build() {
     join(root, 'src/gui/renderer/index.html'),
     join(rendererOut, 'index.html'),
   )
+  await mkdir(join(rendererOut, 'assets'), { recursive: true })
+  await copyFile(join(logoAssets, 'microcode-logo.svg'), join(rendererOut, 'assets', 'microcode-logo.svg'))
+  await cp(join(logoAssets, 'generated'), join(rendererOut, 'assets'), { recursive: true, force: true })
 }
 
 build().catch((error) => {

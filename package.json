@@ -19,6 +19,7 @@
     "start:gui": "electron ./dist/gui/electron/main.cjs",
     "build:gui": "bun run build-gui.ts",
     "build": "bun run build.ts",
+    "assets:icons": "bun run assets/logo/generate-icons.ts",
     "package:cli": "bun run packaging/package-cli.ts",
     "package:gui": "bun run packaging/package-gui.ts",
     "package:all": "bun run packaging/package-all.ts",

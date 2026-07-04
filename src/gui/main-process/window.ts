@@ -10,6 +10,7 @@ export async function createMainWindow(electronDir: string): Promise<void> {
     minHeight: 620,
     backgroundColor: '#0f1117',
     title: 'Microcode',
+    icon: join(electronDir, '../renderer/assets/microcode.png'),
     webPreferences: {
       preload: join(electronDir, '../preload/preload.cjs'),
       contextIsolation: true,

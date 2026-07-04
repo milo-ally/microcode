@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronRight, FileText, FolderOpen, GitBranch, KeyRound, MessageSquare, PanelLeft, Plus, Server, Settings, Sparkles, Trash2, Workflow } from 'lucide-react'
 import { GlassSelect } from '../components/GlassSelect.ts'
+import { BrandLogo } from '../components/BrandLogo.ts'
 import { ApiConfigPanel } from '../features/settings/ApiConfigPanel.ts'
 import { cx } from '../lib/cx.ts'
 import type { GuiRuntimeSnapshot, GuiWorkspaceItem } from '../../shared/types.ts'
@@ -139,7 +140,7 @@ export function Sidebar({
   if (!snapshot) {
     return React.createElement('aside', { className: 'sidebar' },
       React.createElement('div', { className: 'sidebar-brand' },
-        React.createElement('span', null, 'Microcode'),
+        React.createElement(BrandLogo),
       ),
       projectSwitcher,
       React.createElement('div', { className: 'sidebar-section' },
@@ -194,7 +195,7 @@ export function Sidebar({
 
   const shell = (content?: React.ReactNode) => React.createElement('aside', { className: 'sidebar' },
     React.createElement('div', { className: 'sidebar-brand' },
-      React.createElement('span', null, 'Microcode'),
+      React.createElement(BrandLogo),
       React.createElement('button', { title: '折叠侧边栏', onClick: onToggleCollapse }, React.createElement(PanelLeft, { size: 18 })),
     ),
     projectSwitcher,
