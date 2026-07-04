@@ -283,10 +283,10 @@ export class App {
 
       if (imagePaths.length > 0) {
         if (modelSupportsImages(this.agent.getCurrentModel())) {
-          await this.sessionManager.ensureCreated(process.cwd())
           for (const filePath of imagePaths) {
             const image = tryReadImageFromPath(filePath)
             if (image) {
+              await this.sessionManager.ensureCreated(process.cwd())
               const sessionId = this.sessionManager.getSessionId() ?? 'unknown'
               const { cachePath, fileName } = storeImage(image.data, image.mimeType, sessionId)
               this.pendingImages.push({ cachePath, fileName, mimeType: image.mimeType, base64Data: image.data })

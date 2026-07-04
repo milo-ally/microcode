@@ -726,7 +726,9 @@ export class MicrocodeRuntime {
     const images: ImageContent[] = []
 
     if (!cleanText.trim() && paths.length === 0) return
-    await this.sessionManager.ensureCreated(this.cwd)
+    if (cleanText.trim()) {
+      await this.sessionManager.ensureCreated(this.cwd)
+    }
 
     if (paths.length > 0) {
       if (!modelSupportsImages(this.agent.getCurrentModel())) {
@@ -735,6 +737,7 @@ export class MicrocodeRuntime {
         for (const filePath of paths) {
           const image = tryReadImageFromPath(filePath)
           if (!image) continue
+          await this.sessionManager.ensureCreated(this.cwd)
           const sessionId = this.sessionManager.getSessionId() ?? 'unknown'
           const { fileName } = storeImage(image.data, image.mimeType, sessionId)
           images.push({ type: 'image', data: image.data, mimeType: image.mimeType } as ImageContent)
@@ -1273,12 +1276,44 @@ export class MicrocodeRuntime {
   private updateStreamingMessage(message: AgentMessage, streaming = true): void {
     const id = this.streamingMessageId
     if (!id) return
-    const item = this.timeline.find((entry) => entry.id === id)
-    if (!item || item.kind !== 'message') return
-    item.blocks = extractMessageBlocks(message)
-    item.streaming = streaming
-    item.stopReason = (message as any).stopReason
-    item.errorMessage = (message as any).errorMessage
+    const blocks = extractMessageBlocks(message)
+    const existing = this.timeline.find((entry) => entry.id === id)
+    if (!existing || existing.kind !== 'message') {
+      if (blocks.length === 0) return
+      this.timeline.push({
+        id,
+        kind: 'message',
+        role: 'assistant',
+        blocks,
+        streaming,
+        stopReason: (message as any).stopReason,
+        errorMessage: (message as any).errorMessage,
+        createdAt: Date.now(),
+      })
+      return
+    }
+    existing.blocks = blocks
+    existing.streaming = streaming
+    existing.stopReason = (message as any).stopReason
+    existing.errorMessage = (message as any).errorMessage
+    if (!streaming && blocks.length === 0 && !existing.errorMessage) {
+      this.removeAssistantLoadingPlaceholder(id)
+    }
+  }
+
+  private removeAssistantLoadingPlaceholder(id = this.streamingMessageId ?? this.pendingAssistantMessageId): void {
+    if (!id) return
+    const index = this.timeline.findIndex((entry) => entry.id === id)
+    const item = this.timeline[index]
+    if (!item || item.kind !== 'message' || item.role !== 'assistant') return
+    const isPlaceholder =
+      item.blocks.length === 0 ||
+      (
+        item.blocks.length === 1 &&
+        item.blocks[0]?.type === 'text' &&
+        item.blocks[0].text === '正在思考...'
+      )
+    if (isPlaceholder) this.timeline.splice(index, 1)
   }
 
   private updateStreamingToolCalls(message: AgentMessage): void {
@@ -1315,6 +1350,7 @@ export class MicrocodeRuntime {
         item.args = toolCall.args
         item.statusText = formatToolStatusSafe(toolCall.name, toolCall.args, item.details)
       }
+      this.removeAssistantLoadingPlaceholder()
 
       const streamingDetails = getStreamingToolDetails(toolCall.name, toolCall.args, this.cwd)
       const currentPhase = typeof item.details?.phase === 'string' ? item.details.phase : undefined
@@ -1380,6 +1416,7 @@ export class MicrocodeRuntime {
         status: 'pending',
       }
       this.pendingTools.set(toolCallId, item)
+      this.removeAssistantLoadingPlaceholder()
       this.timeline.push(item)
     }
     Object.assign(item, patch)

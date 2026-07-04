@@ -1,10 +1,22 @@
 import React from 'react'
-import { Bot, MessageSquare, Sparkles } from 'lucide-react'
+import { Bot, Sparkles } from 'lucide-react'
 import { Markdown } from '../../components/Markdown.ts'
 import { cx } from '../../lib/cx.ts'
 import type { GuiChatItem } from '../../../shared/types.ts'
 
+function LoadingDots() {
+  return React.createElement('span', { className: 'loading-dots', 'aria-label': '正在思考' },
+    React.createElement('span', null),
+    React.createElement('span', null),
+    React.createElement('span', null),
+  )
+}
+
 export function MessageItem({ item }: { item: Extract<GuiChatItem, { kind: 'message' }> }) {
+  if (item.blocks.length === 0 && !item.streaming && !item.errorMessage) {
+    return null
+  }
+
   const isThinkingPlaceholder =
     item.role === 'assistant' &&
     item.streaming === true &&
@@ -12,7 +24,9 @@ export function MessageItem({ item }: { item: Extract<GuiChatItem, { kind: 'mess
     item.blocks[0]?.type === 'text' &&
     item.blocks[0].text === '正在思考...'
   return React.createElement('article', { className: cx('chat-item', item.role) },
-    React.createElement('div', { className: 'avatar' }, item.role === 'assistant' ? React.createElement(Bot, { size: 16 }) : React.createElement(MessageSquare, { size: 16 })),
+    item.role === 'assistant'
+      ? React.createElement('div', { className: 'avatar' }, React.createElement(Bot, { size: 16 }))
+      : null,
     React.createElement('div', { className: 'bubble' },
       React.createElement('div', { className: 'bubble-head' },
         React.createElement('span', null, item.role === 'assistant' ? 'Microcode' : 'You'),
@@ -20,11 +34,10 @@ export function MessageItem({ item }: { item: Extract<GuiChatItem, { kind: 'mess
       ),
       isThinkingPlaceholder
         ? React.createElement('div', { className: 'thinking-placeholder' },
-            React.createElement('span', { className: 'mini-spinner' }),
-            React.createElement('span', null, '正在思考...'),
+            React.createElement(LoadingDots),
           )
         : item.blocks.length === 0
-        ? React.createElement('div', { className: 'muted' }, '...')
+        ? null
         : item.blocks.map((block, index) => {
             if (block.type === 'thinking') {
               return React.createElement('div', { className: 'thinking-block', key: index },

@@ -57,6 +57,34 @@ The GUI is a native Electron/Web interface, not an embedded terminal. It reuses
 the same agent runtime, session storage, MCP setup, permission system, and swarm
 supervisor as the TUI.
 
+## Release Packages
+
+Release packaging lives in `packaging/`, separate from `src/` and `test/`.
+CLI/TUI and GUI/App builds are packaged independently.
+
+```bash
+bun run package:cli  # Build a downloadable CLI/TUI package
+bun run package:gui  # Build a downloadable GUI/App package
+bun run package:all  # Build both packages for the current platform
+```
+
+Outputs are written to `packaging/out/`:
+
+| Package | Output |
+|---|---|
+| CLI / TUI | `microcode-cli-v<version>-<platform>-<arch>.tar.gz` on Linux/macOS, `.zip` on Windows |
+| GUI / App | `microcode-gui-v<version>-<platform>-<arch>.tar.gz` on Linux/macOS, `.zip` on Windows |
+
+The CLI package contains a standalone `bin/microcode` binary plus install
+helpers. The GUI package is a portable Electron app with the Electron runtime
+included, so users can extract it and run `./microcode-gui` on Linux/macOS or
+`microcode-gui.cmd` on Windows.
+
+Build these packages on each target operating system to produce native Linux,
+Windows, and macOS downloads. The GUI package should not be cross-packaged from
+another OS because it embeds the local Electron runtime. See
+`packaging/README.md` for the full packaging details.
+
 ## Configuration
 
 ### API Keys & Model Selection
