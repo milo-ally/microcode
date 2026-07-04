@@ -21,6 +21,8 @@ function electronExecutable(): string {
   return 'electron/microcode-gui'
 }
 
+const linuxDesktopId = 'works.earendil.microcode'
+
 function runInstruction(): string {
   if (process.platform === 'win32') return 'Run `microcode-gui.cmd` to start the app.'
   if (process.platform === 'darwin') return 'Run `./microcode-gui` from Terminal, or create a shortcut to it.'
@@ -47,7 +49,7 @@ async function writeLaunchers(packageDir: string): Promise<void> {
       'root="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
       '"$root/install-desktop.sh" >/dev/null 2>&1 || true',
       'export MICROCODE_GUI_APP_DIR="$root/resources/app"',
-      'exec -a Microcode "$root/electron/microcode-gui" --class=Microcode "$MICROCODE_GUI_APP_DIR/electron/main.cjs" "$@"',
+      `exec -a Microcode "$root/electron/microcode-gui" --class=${linuxDesktopId} "$MICROCODE_GUI_APP_DIR/electron/main.cjs" "$@"`,
       '',
     ].join('\n'))
   } else {
@@ -68,8 +70,8 @@ async function writeLaunchers(packageDir: string): Promise<void> {
       'Name=Microcode',
       'Comment=AI-powered coding assistant',
       'Exec=./microcode-gui',
-      'Icon=microcode',
-      'StartupWMClass=Microcode',
+      `Icon=${linuxDesktopId}`,
+      `StartupWMClass=${linuxDesktopId}`,
       'Terminal=false',
       'Categories=Development;',
       '',
@@ -79,18 +81,19 @@ async function writeLaunchers(packageDir: string): Promise<void> {
       'set -eu',
       'root="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
       'desktop_dir="${HOME}/.local/share/applications"',
-      'icon_dir="${HOME}/.local/share/icons/hicolor/1024x1024/apps"',
+      'icon_dir="${HOME}/.local/share/icons/hicolor/512x512/apps"',
       'mkdir -p "$desktop_dir" "$icon_dir"',
-      'cp "$root/microcode.png" "$icon_dir/microcode.png"',
-      'desktop_file="$desktop_dir/microcode.desktop"',
+      `cp "$root/microcode.png" "$icon_dir/${linuxDesktopId}.png"`,
+      `desktop_file="$desktop_dir/${linuxDesktopId}.desktop"`,
+      'rm -f "$desktop_dir/microcode.desktop"',
       '{',
       '  echo "[Desktop Entry]"',
       '  echo "Type=Application"',
       '  echo "Name=Microcode"',
       '  echo "Comment=AI-powered coding assistant"',
       '  echo "Exec=$root/microcode-gui"',
-      '  echo "Icon=microcode"',
-      '  echo "StartupWMClass=Microcode"',
+      '  echo "Icon=$root/microcode.png"',
+      `  echo "StartupWMClass=${linuxDesktopId}"`,
       '  echo "Terminal=false"',
       '  echo "Categories=Development;"',
       '} > "$desktop_file"',

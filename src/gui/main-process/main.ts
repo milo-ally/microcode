@@ -13,7 +13,7 @@ app.setName('Microcode')
 if (process.platform === 'win32') {
   app.setAppUserModelId('works.earendil.microcode')
 } else if (process.platform === 'linux') {
-  app.setDesktopName('microcode.desktop')
+  app.setDesktopName('works.earendil.microcode.desktop')
 }
 
 registerIpc()
