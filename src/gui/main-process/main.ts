@@ -1,10 +1,20 @@
 import { app, BrowserWindow } from 'electron'
-import { dirname, resolve } from 'path'
+import { dirname, join, resolve } from 'path'
 import { registerIpc } from './ipc.ts'
 import { shutdownRuntime } from './runtimeHost.ts'
 import { createMainWindow } from './window.ts'
 
-const electronDir = dirname(resolve(process.argv[1] ?? process.cwd()))
+const appDir = process.env.MICROCODE_GUI_APP_DIR
+  ? resolve(process.env.MICROCODE_GUI_APP_DIR)
+  : dirname(resolve(process.argv[1] ?? process.cwd()))
+const electronDir = join(appDir, 'electron')
+
+app.setName('Microcode')
+if (process.platform === 'win32') {
+  app.setAppUserModelId('works.earendil.microcode')
+} else if (process.platform === 'linux') {
+  app.setDesktopName('microcode.desktop')
+}
 
 registerIpc()
 

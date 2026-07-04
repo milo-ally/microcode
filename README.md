@@ -80,6 +80,11 @@ helpers. The GUI package is a portable Electron app with the Electron runtime
 included, so users can extract it and run `./microcode-gui` on Linux/macOS or
 `microcode-gui.cmd` on Windows.
 
+GUI packages also apply the Microcode app icon at the operating-system level:
+Linux includes a `microcode.desktop` launcher and `install-desktop.sh`, Windows
+patches `Microcode.exe` with `rcedit`, and macOS packages `Microcode.app` with
+`Microcode.icns`.
+
 Build these packages on each target operating system to produce native Linux,
 Windows, and macOS downloads. The GUI package should not be cross-packaged from
 another OS because it embeds the local Electron runtime. See

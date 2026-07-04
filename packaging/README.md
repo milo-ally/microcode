@@ -44,6 +44,16 @@ The GUI package is portable and includes the Electron runtime. On Linux/macOS,
 run `./microcode-gui` from the extracted folder. On Windows, run
 `microcode-gui.cmd`.
 
+GUI app icons are applied at the OS level:
+
+- Linux: the package includes `microcode.desktop`, `microcode.png`, and
+  `install-desktop.sh` for launcher/Dock integration.
+- Windows: the package renames Electron to `Microcode.exe` and uses `rcedit`
+  to replace the executable icon. Install `rcedit` on PATH before running
+  `bun run package:gui` on Windows.
+- macOS: the package renames `Electron.app` to `Microcode.app`, updates
+  `Info.plist`, and replaces the app icon with `Microcode.icns`.
+
 ## Build Both
 
 ```sh
