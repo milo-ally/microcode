@@ -49,7 +49,7 @@ async function writeLaunchers(packageDir: string): Promise<void> {
       'root="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
       '"$root/install-desktop.sh" >/dev/null 2>&1 || true',
       'export MICROCODE_GUI_APP_DIR="$root/resources/app"',
-      `exec -a Microcode "$root/electron/microcode-gui" --class=${linuxDesktopId} "$MICROCODE_GUI_APP_DIR/electron/main.cjs" "$@"`,
+      `exec -a Microcode "$root/electron/microcode-gui" --no-sandbox --class=${linuxDesktopId} "$MICROCODE_GUI_APP_DIR/electron/main.cjs" "$@"`,
       '',
     ].join('\n'))
   } else {
