@@ -260,6 +260,9 @@ export class SessionManager implements AgentSessionPersistence {
     batches: readonly AgentBatch[] = [],
     agentMetas: readonly AgentMeta[] = [],
   ): Promise<void> {
+    if (!this.getSessionId() && tasks.length === 0 && batches.length === 0 && agentMetas.length === 0) {
+      return
+    }
     await this.ensureCreated()
     return this.withManifestLock(() => this.writeManifestUnsafe(tasks, batches, agentMetas))
   }
