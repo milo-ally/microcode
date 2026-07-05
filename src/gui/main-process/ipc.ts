@@ -1,8 +1,17 @@
-import { dialog, ipcMain } from 'electron'
+import { dialog, ipcMain, shell } from 'electron'
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { PermissionMode } from '../../permissions/index.ts'
 import type { GuiApiConfigInput, GuiPermissionDecision, GuiPromptInput } from '../shared/types.ts'
 import { getMainWindow, getRuntime, listRecentWorkspaces, openWorkspace, shutdownRuntime } from './runtimeHost.ts'
+
+function isExternalHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
 
 export function registerIpc(): void {
   ipcMain.handle('microcode:start', async (_event, options) => {
@@ -81,6 +90,10 @@ export function registerIpc(): void {
   })
   ipcMain.handle('microcode:addModelConfig', async (_event, rawJson: string) => {
     return (await getRuntime()).addModelConfig(rawJson)
+  })
+  ipcMain.handle('microcode:openExternal', async (_event, url: string) => {
+    if (!isExternalHttpUrl(url)) return
+    await shell.openExternal(url)
   })
   ipcMain.handle('microcode:pickImages', async () => {
     const result = await dialog.showOpenDialog(getMainWindow()!, {

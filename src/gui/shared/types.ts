@@ -263,6 +263,7 @@ export interface GuiApi {
   mcpAction(action: 'enable' | 'disable' | 'reconnect', serverName: string): Promise<void>
   addMcpConfig(rawJson: string): Promise<GuiConfigPasteResult>
   addModelConfig(rawJson: string): Promise<GuiConfigPasteResult>
+  openExternal(url: string): Promise<void>
   pickImages(): Promise<string[]>
   answerPermission(requestId: string, decision: GuiPermissionDecision): Promise<void>
   answerQuestion(requestId: string, answers: Record<string, string>, block?: boolean): Promise<void>

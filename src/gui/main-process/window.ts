@@ -1,6 +1,15 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { attachMainWindow } from './runtimeHost.ts'
+
+function isExternalHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
 
 export async function createMainWindow(electronDir: string): Promise<void> {
   const mainWindow = new BrowserWindow({
@@ -21,6 +30,17 @@ export async function createMainWindow(electronDir: string): Promise<void> {
 
   attachMainWindow(mainWindow)
 
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalHttpUrl(url)) {
+      void shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isExternalHttpUrl(url)) return
+    event.preventDefault()
+    void shell.openExternal(url)
+  })
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`)
   })

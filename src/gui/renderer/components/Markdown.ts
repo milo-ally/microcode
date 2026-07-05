@@ -1,8 +1,14 @@
 import React, { useMemo } from 'react'
 import { marked } from 'marked'
+import markedKatex from 'marked-katex-extension'
 import { escapeHtml, highlightCodeHtml } from '../lib/syntaxHighlight.ts'
 
 const renderer = new marked.Renderer()
+
+marked.use(markedKatex({
+  nonStandard: true,
+  throwOnError: false,
+}))
 
 renderer.code = ({ text, lang }) => {
   const language = (lang ?? '').trim().split(/\s+/)[0] ?? ''
@@ -17,6 +23,12 @@ renderer.code = ({ text, lang }) => {
     `<pre><code${className}>${highlightCodeHtml(text, language)}</code></pre>`,
     '</div>',
   ].join('')
+}
+
+renderer.link = ({ href, title, tokens }) => {
+  const label = renderer.parser.parseInline(tokens)
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+  return `<a href="${escapeHtml(href)}"${titleAttr} target="_blank" rel="noopener noreferrer">${label}</a>`
 }
 
 export function renderMarkdownHtml(text: string): string {
@@ -44,6 +56,13 @@ async function copyText(text: string): Promise<void> {
 export function Markdown({ text }: { text: string }) {
   const html = useMemo(() => renderMarkdownHtml(text), [text])
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const link = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null
+    if (link?.href) {
+      event.preventDefault()
+      void window.microcode.openExternal(link.href)
+      return
+    }
+
     const button = (event.target as HTMLElement).closest('.markdown-copy-button') as HTMLButtonElement | null
     if (!button) return
     const block = button.closest('.markdown-code-block')

@@ -34,6 +34,7 @@ const api: GuiApi = {
     ipcRenderer.invoke('microcode:mcpAction', action, serverName),
   addMcpConfig: (rawJson: string) => ipcRenderer.invoke('microcode:addMcpConfig', rawJson),
   addModelConfig: (rawJson: string) => ipcRenderer.invoke('microcode:addModelConfig', rawJson),
+  openExternal: (url: string) => ipcRenderer.invoke('microcode:openExternal', url),
   pickImages: () => ipcRenderer.invoke('microcode:pickImages'),
   answerPermission: (requestId: string, decision: GuiPermissionDecision) =>
     ipcRenderer.invoke('microcode:answerPermission', requestId, decision),

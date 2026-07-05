@@ -1197,6 +1197,18 @@ button {
   color: #81a2be;
 }
 
+.markdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
+}
+
+.markdown .katex {
+  color: #f5f0dc;
+  font-size: 1.04em;
+}
+
 .thinking-block {
   border-radius: 6px;
   background: #1b1e28;
