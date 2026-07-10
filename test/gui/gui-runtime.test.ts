@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { resolve } from 'path'
 import '../../src/tools/BashTool/index.ts'
 import {
   extractStreamingToolCalls,
@@ -92,7 +93,7 @@ describe('GUI runtime timeline restore', () => {
       file_path: 'intro.md',
       content: 'hello\nworld\n',
     }, '/tmp/project')).toMatchObject({
-      path: '/tmp/project/intro.md',
+      path: resolve('/tmp/project', 'intro.md'),
       bytesWritten: 12,
       additions: 2,
       removals: 0,

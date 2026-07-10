@@ -34,6 +34,14 @@ On Windows it also includes `install.cmd`.
 bun run package:gui
 ```
 
+On Windows PowerShell, if `bun` resolves to `bun.ps1` and script execution is
+disabled, run the same command through `bun.cmd`, for example
+`bun.cmd run package:gui`.
+
+If a previous Windows GUI package is still running, Windows may lock its staging
+directory. The packaging script will use a `.build-...` staging directory and
+still write the normal `microcode-gui-v<version>-windows-<arch>.zip` artifact.
+
 Creates:
 
 - `packaging/out/staging/microcode-gui-v<version>-<platform>-<arch>/`
@@ -42,15 +50,14 @@ Creates:
 
 The GUI package is portable and includes the Electron runtime. On Linux/macOS,
 run `./microcode-gui` from the extracted folder. On Windows, run
-`microcode-gui.cmd`.
+`electron\Microcode.exe`.
 
 GUI app icons are applied at the OS level:
 
 - Linux: the package includes `microcode.desktop`, `microcode.png`, and
   `install-desktop.sh` for launcher/Dock integration.
-- Windows: the package renames Electron to `Microcode.exe` and uses `rcedit`
-  to replace the executable icon. Install `rcedit` on PATH before running
-  `bun run package:gui` on Windows.
+- Windows: the package renames Electron to `Microcode.exe` and uses the local
+  `rcedit` dependency to replace the executable icon.
 - macOS: the package renames `Electron.app` to `Microcode.app`, updates
   `Info.plist`, and replaces the app icon with `Microcode.icns`.
 

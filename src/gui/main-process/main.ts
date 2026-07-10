@@ -4,9 +4,17 @@ import { registerIpc } from './ipc.ts'
 import { shutdownRuntime } from './runtimeHost.ts'
 import { createMainWindow } from './window.ts'
 
-const appDir = process.env.MICROCODE_GUI_APP_DIR
-  ? resolve(process.env.MICROCODE_GUI_APP_DIR)
-  : dirname(resolve(process.argv[1] ?? process.cwd()))
+function resolveAppDir(): string {
+  if (process.env.MICROCODE_GUI_APP_DIR) {
+    return resolve(process.env.MICROCODE_GUI_APP_DIR)
+  }
+  if (process.defaultApp && process.argv[1]) {
+    return dirname(resolve(process.argv[1]))
+  }
+  return app.getAppPath()
+}
+
+const appDir = resolveAppDir()
 const electronDir = join(appDir, 'electron')
 
 app.setName('Microcode')

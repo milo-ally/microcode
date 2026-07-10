@@ -146,7 +146,7 @@ export function Sidebar({
       React.createElement('div', { className: 'sidebar-section' },
         startupError
           ? React.createElement('div', { className: 'config-error' }, startupError)
-          : React.createElement('div', { className: 'muted' }, 'Starting runtime...'),
+          : React.createElement('div', { className: 'muted' }, 'Choose a project to begin.'),
       ),
       recentWorkspaceList.length > 0 && React.createElement('div', { className: 'sidebar-section' },
         React.createElement('div', { className: 'sidebar-label' }, 'Recent Projects'),

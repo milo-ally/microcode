@@ -20,15 +20,21 @@ describe('runtime tools', () => {
     try {
       const updates: any[] = []
       const tool = createBashTool(cwd)
+      const outputCommand = process.platform === 'win32'
+        ? 'Write-Output "one`rTWO"; [Console]::Error.WriteLine("err")'
+        : 'printf "one\\rTWO\\n"; printf "err\\n" >&2'
+      const timeoutCommand = process.platform === 'win32'
+        ? 'Start-Sleep -Seconds 1'
+        : 'sleep 1'
       const result = await tool.execute('bash', {
-        command: 'printf "one\\rTWO\\n"; printf "err\\n" >&2',
+        command: outputCommand,
       }, undefined, (update) => updates.push(update))
 
       expect(result.details?.stdout).toContain('TWO')
       expect(result.details?.stderr).toContain('err')
       expect(result.details?.exitCode).toBe(0)
 
-      const timed = await tool.execute('bash', { command: 'sleep 1', timeout: 0.01 })
+      const timed = await tool.execute('bash', { command: timeoutCommand, timeout: 0.01 })
       expect(timed.details?.exitCode).toBeNull()
     } finally {
       await rm(cwd, { recursive: true, force: true })

@@ -299,6 +299,10 @@ function shouldSkipForGrep(filePath: string): boolean {
   return false
 }
 
+function normalizeRelativePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/')
+}
+
 // ============================================================================
 // File system helpers
 // ============================================================================
@@ -325,7 +329,7 @@ async function getMtimes(rootDir: string, relPaths: string[]): Promise<Map<strin
 function listFiles(rootDir: string, extraGlobs?: string[]): string[] {
   let files: string[]
   try {
-    files = readdirSync(rootDir, { recursive: true }) as string[]
+    files = (readdirSync(rootDir, { recursive: true }) as string[]).map(normalizeRelativePath)
   } catch {
     return []
   }
@@ -379,7 +383,7 @@ export async function globSearch(
 
   let allFiles: string[]
   try {
-    allFiles = readdirSync(searchDir, { recursive: true }) as string[]
+    allFiles = (readdirSync(searchDir, { recursive: true }) as string[]).map(normalizeRelativePath)
   } catch {
     return { files: [], truncated: false, durationMs: Date.now() - t0 }
   }

@@ -67,7 +67,4 @@ async function build() {
   await cp(join(logoAssets, 'generated'), join(rendererOut, 'assets'), { recursive: true, force: true })
 }
 
-build().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error))
-  process.exit(1)
-})
+await build()

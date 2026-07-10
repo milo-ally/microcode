@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { chmod, copyFile, readFile, rename, writeFile } from 'fs/promises'
 import { join } from 'path'
+import { rcedit } from 'rcedit'
 import {
   archiveDirectory,
   assertExists,
@@ -24,21 +25,13 @@ function electronExecutable(): string {
 const linuxDesktopId = 'works.earendil.microcode'
 
 function runInstruction(): string {
-  if (process.platform === 'win32') return 'Run `microcode-gui.cmd` to start the app.'
+  if (process.platform === 'win32') return 'Run `electron\\Microcode.exe` to start the app.'
   if (process.platform === 'darwin') return 'Run `./microcode-gui` from Terminal, or create a shortcut to it.'
   return 'Run `./microcode-gui` to start the app.'
 }
 
 async function writeLaunchers(packageDir: string): Promise<void> {
   if (process.platform === 'win32') {
-    await Bun.write(join(packageDir, 'microcode-gui.cmd'), [
-      '@echo off',
-      'setlocal',
-      'set "ROOT=%~dp0"',
-      'set "MICROCODE_GUI_APP_DIR=%ROOT%resources\\app"',
-      '"%ROOT%electron\\Microcode.exe" "%ROOT%resources\\app\\electron\\main.cjs" %*',
-      '',
-    ].join('\r\n'))
     return
   }
 
@@ -106,38 +99,22 @@ async function writeLaunchers(packageDir: string): Promise<void> {
   }
 }
 
-async function commandExists(command: string): Promise<boolean> {
-  const proc = process.platform === 'win32'
-    ? Bun.spawn(['cmd', '/c', 'where', command], { stdout: 'ignore', stderr: 'ignore' })
-    : Bun.spawn(['sh', '-c', `command -v ${command} >/dev/null 2>&1`])
-  return await proc.exited === 0
-}
-
-async function run(cmd: string[]): Promise<void> {
-  const proc = Bun.spawn(cmd, { stdout: 'inherit', stderr: 'inherit' })
-  const exitCode = await proc.exited
-  if (exitCode !== 0) throw new Error(`Command failed (${exitCode}): ${cmd.join(' ')}`)
-}
-
 async function patchWindowsExecutable(packageDir: string): Promise<void> {
   const source = join(packageDir, 'electron', 'electron.exe')
   const target = join(packageDir, 'electron', 'Microcode.exe')
   await rename(source, target)
   const iconPath = join(projectRoot, 'assets', 'logo', 'generated', 'microcode.ico')
-  if (!(await commandExists('rcedit'))) {
-    throw new Error('Windows GUI packaging requires rcedit on PATH to replace the Electron executable icon.')
-  }
-  await run([
-    'rcedit',
-    target,
-    '--set-icon', iconPath,
-    '--set-version-string', 'ProductName', 'Microcode',
-    '--set-version-string', 'FileDescription', 'Microcode',
-    '--set-version-string', 'CompanyName', 'Earendil Works',
-    '--set-version-string', 'InternalName', 'Microcode',
-    '--set-version-string', 'OriginalFilename', 'Microcode.exe',
-    '--set-version-string', 'AppUserModelId', 'works.earendil.microcode',
-  ])
+  await rcedit(target, {
+    icon: iconPath,
+    'version-string': {
+      ProductName: 'Microcode',
+      FileDescription: 'Microcode',
+      CompanyName: 'Earendil Works',
+      InternalName: 'Microcode',
+      OriginalFilename: 'Microcode.exe',
+      AppUserModelId: 'works.earendil.microcode',
+    },
+  })
 }
 
 async function patchMacApp(packageDir: string, version: string): Promise<void> {
@@ -177,16 +154,18 @@ async function main(): Promise<void> {
   const meta = await readPackageMeta()
   const tag = platformTag()
   const packageName = `microcode-gui-v${meta.version}-${tag}`
-  const packageDir = join(stagingRoot, packageName)
-  const appDir = join(packageDir, 'resources', 'app')
+  let packageDir = join(stagingRoot, packageName)
 
   await Bun.$`bun run build-gui.ts`.cwd(projectRoot)
-  await resetDir(packageDir)
+  packageDir = await resetDir(packageDir)
+  const resolvedAppDir = process.platform === 'win32'
+    ? join(packageDir, 'electron', 'resources', 'app')
+    : join(packageDir, 'resources', 'app')
 
   await copyDir(join(projectRoot, 'node_modules', 'electron', 'dist'), join(packageDir, 'electron'))
-  await copyDir(join(projectRoot, 'dist', 'gui', 'electron'), join(appDir, 'electron'))
-  await copyDir(join(projectRoot, 'dist', 'gui', 'preload'), join(appDir, 'preload'))
-  await copyDir(join(projectRoot, 'dist', 'gui', 'renderer'), join(appDir, 'renderer'))
+  await copyDir(join(projectRoot, 'dist', 'gui', 'electron'), join(resolvedAppDir, 'electron'))
+  await copyDir(join(projectRoot, 'dist', 'gui', 'preload'), join(resolvedAppDir, 'preload'))
+  await copyDir(join(projectRoot, 'dist', 'gui', 'renderer'), join(resolvedAppDir, 'renderer'))
   await copyFile(
     join(projectRoot, 'assets', 'logo', 'generated', 'microcode.png'),
     join(packageDir, 'microcode.png'),
@@ -205,7 +184,7 @@ async function main(): Promise<void> {
     await patchMacApp(packageDir, meta.version)
   }
 
-  await Bun.write(join(appDir, 'package.json'), JSON.stringify({
+  await Bun.write(join(resolvedAppDir, 'package.json'), JSON.stringify({
     name: 'microcode-gui',
     version: meta.version,
     private: true,
@@ -226,8 +205,8 @@ async function main(): Promise<void> {
   ].join('\n'))
 
   await assertExists(join(packageDir, electronExecutable()))
-  await assertExists(join(appDir, 'electron', 'main.cjs'))
-  await assertExists(join(appDir, 'renderer', 'index.html'))
+  await assertExists(join(resolvedAppDir, 'electron', 'main.cjs'))
+  await assertExists(join(resolvedAppDir, 'renderer', 'index.html'))
   const archive = await archiveDirectory(packageDir, join(outRoot, packageName))
   formatDone('GUI package', packageDir)
   formatDone('GUI archive', archive)

@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from 'fs/promises'
+import { chmod, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises'
 import { basename, dirname, join, resolve } from 'path'
 
 export const projectRoot = resolve(import.meta.dir, '..')
@@ -29,9 +29,54 @@ export async function readPackageMeta(): Promise<PackageMeta> {
   }
 }
 
-export async function resetDir(path: string): Promise<void> {
-  await rm(path, { recursive: true, force: true })
+function isAccessError(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? (error as { code?: unknown }).code
+    : undefined
+  return typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (code === 'EACCES' || code === 'EPERM' || code === 'EBUSY')
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function removeWithRetry(path: string): Promise<void> {
+  const attempts = process.platform === 'win32' ? 5 : 1
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await rm(path, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (attempt === attempts || !isAccessError(error)) throw error
+      await delay(150 * attempt)
+    }
+  }
+}
+
+export async function resetDir(path: string): Promise<string> {
+  try {
+    await removeWithRetry(path)
+  } catch (error) {
+    if (process.platform !== 'win32' || !isAccessError(error)) throw error
+
+    const stalePath = `${path}.stale-${process.pid}-${Date.now()}`
+    try {
+      await rename(path, stalePath)
+      removeWithRetry(stalePath).catch(() => {})
+    } catch (renameError) {
+      if (!isAccessError(renameError)) throw renameError
+      const alternatePath = `${path}.build-${process.pid}-${Date.now()}`
+      console.warn(`Could not remove locked staging directory; using ${alternatePath}`)
+      await removeWithRetry(alternatePath)
+      await mkdir(alternatePath, { recursive: true })
+      return alternatePath
+    }
+  }
   await mkdir(path, { recursive: true })
+  return path
 }
 
 export async function copyDir(from: string, to: string): Promise<void> {
@@ -74,7 +119,7 @@ export async function archiveDirectory(sourceDir: string, artifactBase: string):
 
   if (process.platform === 'win32') {
     const archivePath = `${artifactBase}.zip`
-    await rm(archivePath, { force: true })
+    await removeWithRetry(archivePath)
     await run([
       'powershell',
       '-NoProfile',
@@ -85,7 +130,7 @@ export async function archiveDirectory(sourceDir: string, artifactBase: string):
   }
 
   const archivePath = `${artifactBase}.tar.gz`
-  await rm(archivePath, { force: true })
+  await removeWithRetry(archivePath)
   await run(['tar', '-czf', archivePath, '-C', parent, name])
   return archivePath
 }

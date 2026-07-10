@@ -73,22 +73,6 @@ export function App() {
         refreshWorkspaces()
       }
     })
-    window.microcode.start().then(({ snapshot, timeline }) => {
-      setSnapshot(snapshot)
-      setTimeline(timeline)
-      setStartupError(undefined)
-      refreshWorkspaces()
-    }).catch((error) => {
-      setSnapshot(undefined)
-      setStartupError(error instanceof Error ? error.message : String(error))
-      setTimeline([{
-        id: 'startup-error',
-        kind: 'notice',
-        level: 'error',
-        text: error instanceof Error ? error.message : String(error),
-        createdAt: Date.now(),
-      }])
-    })
     const keyHandler = (event: KeyboardEvent) => {
       if (event.isComposing) return
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
@@ -235,7 +219,7 @@ export function App() {
       React.createElement('header', { className: 'titlebar' },
         React.createElement('div', null,
           React.createElement('strong', null, 'Microcode'),
-          React.createElement('span', null, snapshot?.sessionTitle || '新会话'),
+          React.createElement('span', null, snapshot?.sessionTitle || 'Welcome'),
         ),
         React.createElement('div', { className: 'titlebar-actions' },
           React.createElement('button', { className: 'small-button', onClick: () => setPaletteOpen(true) }, React.createElement(Search, { size: 15 }), 'Commands'),

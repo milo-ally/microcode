@@ -25,10 +25,10 @@ async function main(): Promise<void> {
   const tag = platformTag()
   const binaryName = process.platform === 'win32' ? 'microcode.exe' : 'microcode'
   const packageName = `microcode-cli-v${meta.version}-${tag}`
-  const packageDir = join(stagingRoot, packageName)
+  let packageDir = join(stagingRoot, packageName)
 
   await Bun.$`bun run build.ts --no-install`.cwd(projectRoot)
-  await resetDir(packageDir)
+  packageDir = await resetDir(packageDir)
 
   await copyFileExecutable(
     join(projectRoot, 'dist', binaryName),
