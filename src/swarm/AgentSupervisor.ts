@@ -76,6 +76,7 @@ export class AgentSupervisor {
   private readonly unsubscribers = new Map<string, () => void>()
   private readonly queuedPrompts = new Map<string, string>()
   private readonly batches = new Map<string, AgentBatch>()
+  private readonly claimedBatchWaits = new Map<string, number>()
   private sleepingAgentMetas: AgentMeta[] = []
   private currentCoordinatorTurnId?: string
   private coordinatorUnsubscribe?: () => void
@@ -437,6 +438,7 @@ export class AgentSupervisor {
   ): Promise<Readonly<AgentTask>[]> {
     const batch = this.batches.get(batchId)
     if (!batch) throw new Error(`Agent batch not found: ${batchId}`)
+    const releaseWaitClaim = this.claimBatchWait(batchId)
     if (batch.status === 'open') {
       batch.status = 'sealed'
       batch.sealedAt = Date.now()
@@ -467,22 +469,28 @@ export class AgentSupervisor {
 
     const current = emitProgress()
     if (current.length === batch.taskIds.length && current.every(isTerminal)) {
-      this.tryDeliverBatch(batchId)
+      this.consumeClaimedBatch(batchId)
+      releaseWaitClaim()
       return current
     }
 
     return new Promise<Readonly<AgentTask>[]>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined
-      const cleanup = () => {
+      let settled = false
+      const cleanup = (restoreAutomaticDelivery: boolean) => {
+        if (settled) return
+        settled = true
         unsubscribe()
         if (timer) clearTimeout(timer)
         options.signal?.removeEventListener('abort', onAbort)
+        releaseWaitClaim()
+        if (restoreAutomaticDelivery) this.tryDeliverBatch(batchId)
       }
       const check = () => {
         const tasks = emitProgress()
         if (tasks.length === batch.taskIds.length && tasks.every(isTerminal)) {
-          cleanup()
-          this.tryDeliverBatch(batchId)
+          this.consumeClaimedBatch(batchId)
+          cleanup(false)
           resolve(tasks)
         }
       }
@@ -490,19 +498,20 @@ export class AgentSupervisor {
         if ('task' in event && event.task.batchId === batchId) check()
       })
       const onAbort = () => {
-        cleanup()
+        cleanup(true)
         reject(new Error(`Waiting for agent batch ${batchId} was cancelled.`))
       }
       options.signal?.addEventListener('abort', onAbort, { once: true })
       if (options.timeoutMs && options.timeoutMs > 0) {
         timer = setTimeout(() => {
-          cleanup()
+          cleanup(true)
           reject(new Error(
             `Timed out waiting for agent batch ${batchId}. Agents continue running; wait again instead of polling.`,
           ))
         }, options.timeoutMs)
       }
-      check()
+      if (options.signal?.aborted) onAbort()
+      else check()
     })
   }
 
@@ -807,6 +816,7 @@ export class AgentSupervisor {
   private tryDeliverBatch(batchId: string): void {
     const batch = this.batches.get(batchId)
     if (!batch || batch.status !== 'sealed') return
+    if (this.claimedBatchWaits.has(batchId)) return
     const tasks = batch.taskIds
       .map((taskId) => this.tasks.get(taskId))
       .filter((task): task is Readonly<AgentTask> => Boolean(task))
@@ -824,6 +834,31 @@ export class AgentSupervisor {
     } else if (!this.shuttingDown) {
       void this.coordinator.prompt(notification)
     }
+  }
+
+  private claimBatchWait(batchId: string): () => void {
+    this.claimedBatchWaits.set(
+      batchId,
+      (this.claimedBatchWaits.get(batchId) ?? 0) + 1,
+    )
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      const remaining = (this.claimedBatchWaits.get(batchId) ?? 1) - 1
+      if (remaining > 0) {
+        this.claimedBatchWaits.set(batchId, remaining)
+      } else {
+        this.claimedBatchWaits.delete(batchId)
+      }
+    }
+  }
+
+  private consumeClaimedBatch(batchId: string): void {
+    const batch = this.batches.get(batchId)
+    if (!batch || batch.status !== 'sealed') return
+    batch.status = 'delivered'
+    void this.persistManifest()
   }
 
   private serializeTaskResult(task: Readonly<AgentTask>): string {
