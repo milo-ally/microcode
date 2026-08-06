@@ -1,6 +1,6 @@
 # Microcode
 
-AI-powered coding assistant with terminal (TUI) interface.
+A Light AI-powered coding assistant.
 
 ## Prerequisites
 
